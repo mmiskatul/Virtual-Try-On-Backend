@@ -7,6 +7,7 @@ import {
 } from '../domain/types.js';
 import { config } from './config.js';
 import { NeonSqlDatabase } from './neon_database.js';
+import { PrismaDatabase } from './prisma_database.js';
 
 export interface DatabaseCollections {
   tenants: Tenant[];
@@ -33,14 +34,36 @@ export class Database {
 
   private snapshotPath: string;
   private neonSql: NeonSqlDatabase | null = null;
+  private prismaDb: PrismaDatabase | null = null;
   private transactionLock: Promise<void> = Promise.resolve();
 
   constructor(customSnapshotPath?: string) {
     this.snapshotPath = customSnapshotPath || path.resolve(process.cwd(), '.data', 'db_snapshot.json');
     this.init();
     if (config.databaseUrl) {
+      this.initPrisma(config.databaseUrl);
       this.initNeonSql(config.databaseUrl);
     }
+  }
+
+  private async initPrisma(url: string): Promise<void> {
+    try {
+      this.prismaDb = new PrismaDatabase(url);
+      const connected = await this.prismaDb.init();
+      if (connected) {
+        console.log('[Database] Active persistence: Prisma ORM with PostgreSQL.');
+      }
+    } catch (err: any) {
+      console.warn('[Database] Prisma ORM init failed, running on resilient memory snapshot:', err.message);
+    }
+  }
+
+  public isPrismaActive(): boolean {
+    return this.prismaDb !== null && this.prismaDb.isConnected();
+  }
+
+  public getPrisma(): PrismaDatabase | null {
+    return this.prismaDb;
   }
 
   private async initNeonSql(url: string): Promise<void> {
@@ -56,7 +79,7 @@ export class Database {
   }
 
   public isNeonSqlActive(): boolean {
-    return this.neonSql !== null && this.neonSql.isConnected();
+    return this.isPrismaActive() || (this.neonSql !== null && this.neonSql.isConnected());
   }
 
   public getNeonSql(): NeonSqlDatabase | null {

@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// 1. Tenants Table
+model Tenant {
+  id                 String        @id @db.VarChar(64)
+  name               String        @db.VarChar(255)
+  slug               String        @unique @db.VarChar(255)
+  status             String        @default("ACTIVE") @db.VarChar(32)
+  logoUrl            String?       @map("logo_url") @db.Text
+  bannerUrl          String?       @map("banner_url") @db.Text
+  description        String?       @db.Text
+  contactEmail       String        @map("contact_email") @db.VarChar(255)
+  storefrontSettings Json?         @map("storefront_settings")
+  createdAt          BigInt        @map("created_at")
+  updatedAt          BigInt        @map("updated_at")
+
+  users              User[]
+  products           Product[]
+  fabrics            Fabric[]
+  subscription       Subscription?
+  orders             Order[]
+
+  @@map("tenants")
+}
+
+// 2. Users Table
+model User {
+  id           String   @id @db.VarChar(64)
+  tenantId     String?  @map("tenant_id") @db.VarChar(64)
+  tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name         String   @db.VarChar(255)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  role         String   @db.VarChar(64)
+  createdAt    BigInt   @map("created_at")
+
+  @@index([tenantId])
+  @@index([email])
+  @@map("users")
+}
+
+// 3. Products Table
+model Product {
+  id                       String   @id @db.VarChar(64)
+  tenantId                 String   @map("tenant_id") @db.VarChar(64)
+  tenant                   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name                     String   @db.VarChar(255)
+  slug                     String   @db.VarChar(255)
+  description              String?  @db.Text
+  category                 String   @db.VarChar(128)
+  subCategory              String?  @map("sub_category") @db.VarChar(128)
+  collection               String?  @db.VarChar(128)
+  sku                      String   @db.VarChar(128)
+  price                    Float
+  compareAtPrice           Float?   @map("compare_at_price")
+  images                   Json     @default("[]")
+  fabricIds                Json     @default("[]") @map("fabric_ids")
+  tags                     Json     @default("[]")
+  brandStorefrontPublished Boolean  @default(true) @map("brand_storefront_published")
+  marketplacePublished     Boolean  @default(false) @map("marketplace_published")
+  isTryOnEligible          Boolean  @default(true) @map("is_try_on_eligible")
+  tryOnCategory            String   @default("tops") @map("try_on_category") @db.VarChar(64)
+  specs                    Json?
+  variants                 Json     @default("[]")
+  createdAt                BigInt   @map("created_at")
+  updatedAt                BigInt   @map("updated_at")
+
+  @@index([tenantId])
+  @@index([marketplacePublished])
+  @@map("products")
+}
+
+// 4. Fabrics Table
+model Fabric {
+  id               String   @id @db.VarChar(64)
+  tenantId         String   @map("tenant_id") @db.VarChar(64)
+  tenant           Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name             String   @db.VarChar(255)
+  composition      String   @db.VarChar(255)
+  color            String   @db.VarChar(128)
+  pattern          String   @db.VarChar(128)
+  weightGsm        Int?     @map("weight_gsm")
+  stretch          String?  @db.VarChar(32)
+  transparency     String?  @db.VarChar(32)
+  thickness        String?  @db.VarChar(32)
+  careInstructions String?  @map("care_instructions") @db.Text
+  textureUrl       String?  @map("texture_url") @db.Text
+  createdAt        BigInt   @map("created_at")
+
+  @@index([tenantId])
+  @@map("fabrics")
+}
+
+// 5. Subscriptions Table
+model Subscription {
+  id                String  @id @db.VarChar(64)
+  tenantId          String  @unique @map("tenant_id") @db.VarChar(64)
+  tenant            Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan              String  @default("STARTER") @db.VarChar(64)
+  productLimit      Int     @default(50) @map("product_limit")
+  tryOnMonthlyQuota Int     @default(500) @map("try_on_monthly_quota")
+  tryOnUsed         Int     @default(0) @map("try_on_used")
+  status            String  @default("ACTIVE") @db.VarChar(32)
+  updatedAt         BigInt  @map("updated_at")
+
+  @@map("subscriptions")
+}
+
+// 6. Orders Table
+model Order {
+  id              String   @id @db.VarChar(64)
+  tenantId        String   @map("tenant_id") @db.VarChar(64)
+  tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customerId      String?  @map("customer_id") @db.VarChar(64)
+  customerEmail   String   @map("customer_email") @db.VarChar(255)
+  status          String   @default("PENDING") @db.VarChar(64)
+  totalAmount     Float    @map("total_amount")
+  subtotal        Float
+  shippingFee     Float    @default(0) @map("shipping_fee")
+  shippingAddress Json?    @map("shipping_address")
+  items           Json     @default("[]")
+  paymentStatus   String   @default("PENDING") @map("payment_status") @db.VarChar(64)
+  createdAt       BigInt   @map("created_at")
+  updatedAt       BigInt   @map("updated_at")
+
+  @@index([tenantId])
+  @@map("orders")
+}
+
+// 7. Inventory Logs Table
+model InventoryLog {
+  id         String @id @db.VarChar(64)
+  tenantId   String @map("tenant_id") @db.VarChar(64)
+  productId  String @map("product_id") @db.VarChar(64)
+  variantSku String @map("variant_sku") @db.VarChar(128)
+  change     Int
+  newStock   Int    @map("new_stock")
+  reason     String @db.Text
+  timestamp  BigInt
+
+  @@index([tenantId])
+  @@map("inventory_logs")
+}
+
+// 8. Audit Logs Table
+model AuditLog {
+  id        String  @id @db.VarChar(64)
+  tenantId  String? @map("tenant_id") @db.VarChar(64)
+  actorId   String  @map("actor_id") @db.VarChar(255)
+  actorRole String  @map("actor_role") @db.VarChar(64)
+  action    String  @db.VarChar(128)
+  entity    String  @db.VarChar(128)
+  entityId  String? @map("entity_id") @db.VarChar(255)
+  details   Json?
+  timestamp BigInt
+
+  @@index([timestamp])
+  @@map("audit_logs")
+}

@@ -80,7 +80,28 @@ CLOUDINARY_API_SECRET=
 CLOUDINARY_FOLDER=virtual-try-on
 ```
 
-### 3. Run Development Server
+### 3. Prisma ORM Commands
+```bash
+# Validate Prisma schema
+npm run prisma:validate
+
+# Generate Prisma Client
+npm run prisma:generate
+
+# Push schema directly to database
+npm run prisma:push
+
+# Run Prisma migrations
+npm run prisma:migrate
+
+# Open Prisma Studio GUI
+npm run prisma:studio
+
+# Run Prisma verification test suite
+npm run test:prisma
+```
+
+### 4. Run Development Server
 ```bash
 npm run dev
 ```
@@ -90,13 +111,16 @@ Starts Fastify 5 listening simultaneously on:
 - `http://localhost:4003` -> Super Admin API
 - `http://localhost:4000` -> Unified Gateway
 
-### 4. Run Test Suite
+### 5. Run Test Suite
 ```bash
+# Main 30-case integration test suite
 npm test
-```
-Runs the 30-case integration test suite across all domains with 100% pass guarantee.
 
-### 5. Build for Production
+# Prisma ORM integration test suite (48 checks)
+npm run test:prisma
+```
+
+### 6. Build for Production
 ```bash
 npm run build
 npm start

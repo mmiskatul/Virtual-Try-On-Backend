@@ -20,6 +20,7 @@ async function bootstrap() {
       unifiedApp.listen({ port: config.port, host: config.host })
     ]);
 
+    const isPrisma = db.isPrismaActive();
     const isSql = db.isNeonSqlActive();
 
     console.log(`✅ [Brand API]          Listening on http://${config.host}:${config.brandApiPort}`);
@@ -34,7 +35,7 @@ async function bootstrap() {
     console.log(`✅ [Unified Gateway]    Listening on http://${config.host}:${config.port}`);
     console.log(`   └─ All microservice routes consolidated on single port\n`);
 
-    console.log(`💾 [Persistence Engine] ${isSql ? 'Neon PostgreSQL Serverless SQL' : 'Resilient In-Memory + File Snapshot'}`);
+    console.log(`💾 [Persistence Engine] ${isPrisma ? 'Prisma ORM (PostgreSQL Serverless)' : isSql ? 'Neon PostgreSQL Serverless SQL' : 'Resilient In-Memory + File Snapshot'}`);
     console.log(`🎨 [Cloudinary Storage] ${config.cloudinaryCloudName ? `Connected to '${config.cloudinaryCloudName}'` : 'Local Fallback / Memory'}`);
     console.log(`🤖 [AI Engine Target]   ${config.aiServiceUrl} (FastAPI)\n`);
     console.log('=============================================================\n');
