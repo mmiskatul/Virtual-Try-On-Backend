@@ -40,5 +40,10 @@ export const config = {
   cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
   cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || '',
   cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || '',
-  cloudinaryFolder: process.env.CLOUDINARY_FOLDER || 'virtual-try-on'
+  cloudinaryFolder: process.env.CLOUDINARY_FOLDER || 'virtual-try-on',
+
+  // External AI Virtual Try-On API (Fashn.ai, Replicate, Kling, Segmind, or custom)
+  vtonApiKey: process.env.VTON_API_KEY || process.env.FASHN_API_KEY || process.env.REPLICATE_API_TOKEN || '',
+  vtonApiUrl: process.env.VTON_API_URL || '',
+  vtonProvider: process.env.VTON_PROVIDER || 'auto'
 };

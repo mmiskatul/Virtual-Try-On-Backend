@@ -1,9 +1,23 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { config } from '../../infrastructure/config.js';
 import { db } from '../../infrastructure/database.js';
+import { externalVtonService } from '../../infrastructure/vton_api.js';
 
 export async function marketplaceTryOnRoutes(app: FastifyInstance) {
-  // Dispatch Virtual Try-On Job to AI Engine
+  // Query Active VTON Engine / API Provider Status
+  app.get('/api/v1/try-on/provider', async () => {
+    const isExternal = externalVtonService.isConfigured();
+    const provider = externalVtonService.detectProvider();
+    return {
+      mode: isExternal ? 'external_api' : 'local_ai_service',
+      provider,
+      externalConfigured: isExternal,
+      engineUrl: isExternal ? (config.vtonApiUrl || `Cloud API (${provider})`) : config.aiServiceUrl,
+      status: 'ready'
+    };
+  });
+
+  // Dispatch Virtual Try-On Job (External API or Local AI Engine)
   app.post('/api/v1/try-on/submit', async (request: FastifyRequest, reply: FastifyReply) => {
     const { personImage, garmentImage, category, tenantId } = (request.body as any) || {};
 
@@ -18,6 +32,25 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
       db.recordTryOnUsage(tenantId);
     }
 
+    // 1. If user configured external VTON API in .env, dispatch to external provider
+    if (externalVtonService.isConfigured()) {
+      try {
+        const result = await externalVtonService.submitTryOn({
+          personImage,
+          garmentImage,
+          category: category || 'tops'
+        });
+        return reply.status(201).send({
+          ...result,
+          provider: externalVtonService.detectProvider()
+        });
+      } catch (extErr: any) {
+        console.warn('[VTON] External API dispatch failed, falling back to AI Service:', extErr.message);
+        // Fall through to local AI service if external API failed
+      }
+    }
+
+    // 2. Local AI Service Engine
     try {
       const response = await fetch(`${config.aiServiceUrl}/api/v1/try-on/jobs`, {
         method: 'POST',
@@ -40,7 +73,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
       const data = await response.json();
       return reply.status(201).send(data);
     } catch (err: any) {
-      // Graceful simulation fallback if AI service is starting
+      // Graceful simulation fallback
       const mockJobId = `job_${Date.now()}_sim`;
       return reply.status(202).send({
         jobId: mockJobId,
@@ -55,6 +88,18 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
   app.get('/api/v1/try-on/status/:jobId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { jobId } = request.params as { jobId: string };
 
+    // Check external VTON service cache first
+    const externalStatus = await externalVtonService.getStatus(jobId);
+    if (externalStatus) {
+      return {
+        jobId: externalStatus.jobId,
+        status: externalStatus.status,
+        resultUrl: externalStatus.resultUrl,
+        provider: externalStatus.provider
+      };
+    }
+
+    // Check local AI service
     try {
       const response = await fetch(`${config.aiServiceUrl}/api/v1/try-on/jobs/${jobId}`);
       if (!response.ok) {
@@ -63,7 +108,6 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
       const data = await response.json();
       return data;
     } catch (err) {
-      // Simulated response if external engine is offline
       return reply.send({
         jobId,
         status: 'COMPLETED',
