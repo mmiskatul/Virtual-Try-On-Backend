@@ -4,6 +4,7 @@ node_modules/
 # Production build artifacts
 dist/
 build/
+test/*.js
 
 # Local databases & snapshot stores
 .data/
