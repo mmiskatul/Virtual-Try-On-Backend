@@ -5,9 +5,9 @@
   "description": "Unified Fastify 5 Enterprise Backend for Virtual Try-On SaaS (Brand, Marketplace, Super Admin)",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "tsx src/index.ts",
+    "dev": "node api.js && tsx watch src/index.ts",
+    "build": "node api.js && tsc",
+    "start": "node api.js && tsx src/index.ts",
     "test": "tsx test/backend.test.ts",
     "test:prisma": "tsx test/prisma.test.ts",
     "prisma:generate": "prisma generate",
@@ -25,7 +25,9 @@
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "cloudinary": "^2.5.1",
+    "dotenv": "^8.2.0",
     "fastify": "^5.2.0",
+    "node-fetch": "^3.3.2",
     "pg": "^8.13.1"
   },
   "devDependencies": {
