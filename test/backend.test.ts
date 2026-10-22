@@ -4,6 +4,7 @@ import { db } from '../src/infrastructure/database.js';
 let app = createApp('all');
 
 async function runTests() {
+  db.reset();
   console.log('🧪 Running Comprehensive Unified Fastify 5 Backend Test Suite...\n');
   let passed = 0;
   let failed = 0;

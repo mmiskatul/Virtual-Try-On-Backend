@@ -25,9 +25,9 @@ if (fs.existsSync(envPath)) {
 export const config = {
   host: process.env.HOST || '0.0.0.0',
   port: Number(process.env.PORT || 4000),
-  brandApiPort: Number(process.env.BRAND_API_PORT || 4001),
-  marketplaceApiPort: Number(process.env.MARKETPLACE_API_PORT || 4002),
-  superAdminApiPort: Number(process.env.SUPER_ADMIN_API_PORT || 4003),
+  brandApiPort: Number(process.env.PORT || 4000),
+  marketplaceApiPort: Number(process.env.PORT || 4000),
+  superAdminApiPort: Number(process.env.PORT || 4000),
   
   jwtSecret: process.env.JWT_SECRET || 'vton_unified_jwt_secret_production_ready_2026',
   passwordSalt: process.env.PASSWORD_SALT || 'vton_production_salt_secure_2026',
@@ -42,8 +42,13 @@ export const config = {
   cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || '',
   cloudinaryFolder: process.env.CLOUDINARY_FOLDER || 'virtual-try-on',
 
-  // External AI Virtual Try-On API (Fashn.ai, Replicate, Kling, Segmind, or custom)
-  vtonApiKey: process.env.VTON_API_KEY || process.env.FASHN_API_KEY || process.env.REPLICATE_API_TOKEN || '',
+  // Google Gemini Multimodal Vision & Fashion Synthesis
+  geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-latest',
+
+  // External AI Virtual Try-On API (Fal.ai, Fashn.ai, Replicate, Kling, Segmind, or custom)
+  falKey: process.env.FAL_KEY || process.env.FAL_API_KEY || '',
+  vtonApiKey: process.env.VTON_API_KEY || process.env.FAL_KEY || process.env.FASHN_API_KEY || process.env.REPLICATE_API_TOKEN || '',
   vtonApiUrl: process.env.VTON_API_URL || '',
-  vtonProvider: process.env.VTON_PROVIDER || 'auto'
+  vtonProvider: process.env.VTON_PROVIDER || 'gemini'
 };

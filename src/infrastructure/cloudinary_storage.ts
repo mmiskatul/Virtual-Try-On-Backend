@@ -34,6 +34,17 @@ export class CloudinaryStorage {
     }
   }
 
+  public reload(newConfig?: { cloudinaryUrl?: string; cloudName?: string; apiKey?: string; apiSecret?: string }): boolean {
+    if (newConfig) {
+      if (newConfig.cloudinaryUrl) config.cloudinaryUrl = newConfig.cloudinaryUrl;
+      if (newConfig.cloudName) config.cloudinaryCloudName = newConfig.cloudName;
+      if (newConfig.apiKey) config.cloudinaryApiKey = newConfig.apiKey;
+      if (newConfig.apiSecret) config.cloudinaryApiSecret = newConfig.apiSecret;
+    }
+    this.init();
+    return this.configured;
+  }
+
   public isConfigured(): boolean {
     return this.configured;
   }
@@ -73,6 +84,22 @@ export class CloudinaryStorage {
       return result.secure_url;
     } catch (err) {
       console.error('[Cloudinary] Base64 upload failed:', err);
+      return null;
+    }
+  }
+
+  public async uploadRemoteUrl(remoteUrl: string, options: CloudinaryUploadOptions = {}): Promise<string | null> {
+    if (!this.configured) return null;
+    try {
+      const result = await cloudinary.uploader.upload(remoteUrl, {
+        folder: options.folder || `${config.cloudinaryFolder}/results`,
+        public_id: options.publicId,
+        tags: options.tags || ['virtual-try-on', 'results'],
+        resource_type: 'image'
+      });
+      return result.secure_url;
+    } catch (err) {
+      console.error('[Cloudinary] Remote URL upload failed:', err);
       return null;
     }
   }

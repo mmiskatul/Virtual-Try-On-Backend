@@ -15,9 +15,10 @@ export class NeonSqlDatabase {
 
   public async init(): Promise<boolean> {
     try {
+      const isSsl = this.databaseUrl.includes('sslmode=require') || this.databaseUrl.includes('neon.tech');
       this.pool = new Pool({
         connectionString: this.databaseUrl,
-        ssl: { rejectUnauthorized: false }, // Required for Neon serverless PostgreSQL
+        ssl: isSsl ? { rejectUnauthorized: false } : undefined,
         max: 10,
         idleTimeoutMillis: 30000,
         connectionTimeoutMillis: 5000,

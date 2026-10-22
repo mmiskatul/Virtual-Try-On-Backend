@@ -13,34 +13,62 @@ export class ExternalVtonService {
   private jobs: Map<string, VtonJobStatus> = new Map();
 
   public isConfigured(): boolean {
-    return Boolean(config.vtonApiKey || config.vtonApiUrl);
+    return Boolean(config.falKey || config.vtonApiKey || config.vtonApiUrl);
   }
 
-  public detectProvider(): 'fashn' | 'replicate' | 'segmind' | 'custom' | 'local' {
+  public detectProvider(): 'fal' | 'fashn' | 'replicate' | 'segmind' | 'custom' | 'local' {
     if (!this.isConfigured()) return 'local';
     const provider = (config.vtonProvider || 'auto').toLowerCase();
-    if (['fashn', 'replicate', 'segmind', 'custom'].includes(provider)) {
+    if (['fal', 'fashn', 'replicate', 'segmind', 'custom'].includes(provider)) {
       return provider as any;
     }
 
-    const key = config.vtonApiKey || '';
+    const key = config.falKey || config.vtonApiKey || '';
     const url = config.vtonApiUrl || '';
 
+    if (config.falKey || key.startsWith('fal_') || (key.includes(':') && !key.includes('/')) || url.includes('fal.ai') || url.includes('fal.run')) return 'fal';
     if (key.startsWith('fa_') || key.startsWith('fashn_') || url.includes('fashn.ai')) return 'fashn';
     if (key.startsWith('r8_') || url.includes('replicate.com')) return 'replicate';
     if (url.includes('segmind.com')) return 'segmind';
     if (url) return 'custom';
-    return 'fashn';
+    return config.falKey ? 'fal' : 'fashn';
   }
 
   public async submitTryOn(payload: {
     personImage: string;
     garmentImage: string;
     category?: string;
+    prompt?: string;
   }): Promise<{ jobId: string; status: string; queuePosition?: number; resultUrl?: string }> {
     const provider = this.detectProvider();
     const jobId = `vton_ext_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const category = (payload.category || 'tops').toLowerCase();
+
+    // 0. Fal AI Provider (handled via Python ai-service with fal-client)
+    if (provider === 'fal') {
+      const endpoint = `${config.aiServiceUrl}/api/v1/try-on/jobs`;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          personImage: payload.personImage,
+          garmentImage: payload.garmentImage,
+          category,
+          model_name: 'fal',
+          prompt: payload.prompt
+        })
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Fal AI dispatch error (${res.status}): ${errText}`);
+      }
+      const data: any = await res.json();
+      return {
+        jobId: data.job_id || data.jobId || jobId,
+        status: data.status || 'QUEUED',
+        resultUrl: data.resultUrl || data.output_url
+      };
+    }
 
     // 1. Fashn.ai Provider
     if (provider === 'fashn') {

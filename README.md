@@ -16,9 +16,8 @@ Enterprise high-performance multi-tenant backend consolidating Brand API, Market
 ┌─────▼───────────────┐            ┌─────────▼─────────────┐            ┌───────────▼───────────┐
 │   Brand Dashboard   │            │ Marketplace Frontend  │            │ Super Admin Dashboard │
 │   Port: 3001        │            │ Port: 3000            │            │ Port: 3002            │
-└─────┬───────────────┘            └─────────┬─────────────┘            └───────────┬───────────┘
       │                                      │                                      │
-      │ :4001                                │ :4002                                │ :4003
+      │ :4000                                │ :4000                                │ :4000
       ▼                                      ▼                                      ▼
 ┌───────────────────────────────────────────────────────────────────────────────────────────┐
 │                                unified `backend` (Fastify 5)                              │
@@ -53,12 +52,9 @@ npm install
 ### 2. Configure Environment (`.env`)
 Copy `.env.example` to `.env`:
 ```bash
-# Server Ports
+# Server Port
 HOST=0.0.0.0
 PORT=4000
-BRAND_API_PORT=4001
-MARKETPLACE_API_PORT=4002
-SUPER_ADMIN_API_PORT=4003
 
 # Security & Tokens
 JWT_SECRET=vton_unified_jwt_secret_production_ready_2026
@@ -105,11 +101,8 @@ npm run test:prisma
 ```bash
 npm run dev
 ```
-Starts Fastify 5 listening simultaneously on:
-- `http://localhost:4001` -> Brand API
-- `http://localhost:4002` -> Marketplace API
-- `http://localhost:4003` -> Super Admin API
-- `http://localhost:4000` -> Unified Gateway
+Starts Fastify 5 listening on single unified port:
+- `http://localhost:4000` -> Consolidated Backend (Brand API, Marketplace API, Super Admin API, System/Health)
 
 ### 5. Run Test Suite
 ```bash

@@ -26,6 +26,7 @@ import { adminTenantRoutes } from './routes/admin/tenant.routes.js';
 import { adminAnalyticsRoutes } from './routes/admin/analytics.routes.js';
 import { adminAuditRoutes } from './routes/admin/audit.routes.js';
 import { adminTelemetryRoutes } from './routes/admin/telemetry.routes.js';
+import { adminAiEngineRoutes } from './routes/admin/ai_engine.routes.js';
 
 export type AppDomain = 'brand' | 'marketplace' | 'admin' | 'all';
 
@@ -109,6 +110,7 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
     app.register(adminAnalyticsRoutes);
     app.register(adminAuditRoutes);
     app.register(adminTelemetryRoutes);
+    app.register(adminAiEngineRoutes);
   }
 
   return app;
