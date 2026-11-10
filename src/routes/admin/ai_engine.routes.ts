@@ -25,7 +25,7 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
         activeProvider: config.vtonProvider || 'gemini',
         gemini: {
           configured: Boolean(config.geminiApiKey),
-          model: config.geminiModel || 'gemini-flash-latest',
+          model: config.geminiModel || 'gemini-3.6-flash',
           maskedKey: maskSecret(config.geminiApiKey),
         },
         fal: {
@@ -194,14 +194,16 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
           if (res.ok) {
             const data: any = await res.json();
             const models = (data.models || []).map((m: any) => m.name.replace('models/', ''));
-            const hasFlash = models.some((m: string) => m.includes('flash'));
+            const recommendedModel = models.includes('gemini-3.6-flash')
+              ? 'gemini-3.6-flash'
+              : (models.find((m: string) => m.includes('flash') && !m.includes('latest')) || models[0]);
 
             return reply.send({
               success: true,
               provider: 'gemini',
               message: `✅ Gemini API Key is valid and operational! Connected to ${models.length} models.`,
               modelsFound: models.length,
-              recommendedModel: hasFlash ? 'gemini-flash-latest' : models[0],
+              recommendedModel,
               sampleModels: models.slice(0, 6),
             });
           }

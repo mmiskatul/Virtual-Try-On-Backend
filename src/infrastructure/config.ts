@@ -30,7 +30,7 @@ export const config = {
   // AI Service & Vision Providers
   aiServiceUrl: process.env.AI_SERVICE_URL || 'http://localhost:8000',
   geminiApiKey: process.env.GEMINI_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-latest',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
   falKey: process.env.FAL_KEY || '',
   vtonProvider: 'gemini', // Runtime selector updated via Super Admin AI Engine UI
 
