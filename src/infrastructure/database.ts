@@ -46,9 +46,14 @@ export class Database {
     this.snapshotPath = customSnapshotPath || path.resolve(process.cwd(), '.data', 'db_snapshot.json');
     this.init();
     if (config.databaseUrl) {
-      this.initPrisma(config.databaseUrl);
-      this.initNeonSql(config.databaseUrl);
+      void this.initConnections(config.databaseUrl);
     }
+  }
+
+  private async initConnections(url: string): Promise<void> {
+    // Ensure SQL schema tables exist before Prisma counts/hydrates rows on fresh databases
+    await this.initNeonSql(url);
+    await this.initPrisma(url);
   }
 
   public getDatabaseProviderLabel(): string {

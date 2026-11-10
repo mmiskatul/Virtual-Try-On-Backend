@@ -26,18 +26,30 @@ export function requiresSslConnection(connectionString: string): boolean {
   );
 }
 
+export function createPgPool(connectionString: string): pg.Pool {
+  const isSsl = requiresSslConnection(connectionString);
+  const pool = new Pool({
+    connectionString,
+    ssl: isSsl ? { rejectUnauthorized: false } : undefined,
+    max: 10,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 15000,
+    keepAlive: true,
+  });
+
+  // Prevent unhandled EventEmitter errors when Neon/Supabase suspends idle connections
+  pool.on('error', (err) => {
+    console.warn('[PostgreSQL Pool] Idle client disconnected:', err?.message || err);
+  });
+
+  return pool;
+}
+
 export function createPrismaInstance(options: PrismaClientOptions = {}): { prisma: PrismaClient; pool: pg.Pool } {
   let pool = options.pool;
 
   if (!pool && options.connectionString) {
-    const isSsl = requiresSslConnection(options.connectionString);
-    pool = new Pool({
-      connectionString: options.connectionString,
-      ssl: isSsl ? { rejectUnauthorized: false } : undefined,
-      max: 10,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 8000,
-    });
+    pool = createPgPool(options.connectionString);
   }
 
   if (!pool) {

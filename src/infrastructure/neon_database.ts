@@ -1,9 +1,7 @@
 import pg from 'pg';
 import { POSTGRES_SCHEMA_SQL } from './sql_schema.js';
-import { requiresSslConnection } from './prisma.js';
+import { createPgPool } from './prisma.js';
 import { Tenant, User, Product, Fabric, InventoryLog, Subscription, Order, AuditLog } from '../domain/types.js';
-
-const { Pool } = pg;
 
 export class NeonSqlDatabase {
   private pool: pg.Pool | null = null;
@@ -16,14 +14,7 @@ export class NeonSqlDatabase {
 
   public async init(): Promise<boolean> {
     try {
-      const isSsl = requiresSslConnection(this.databaseUrl);
-      this.pool = new Pool({
-        connectionString: this.databaseUrl,
-        ssl: isSsl ? { rejectUnauthorized: false } : undefined,
-        max: 10,
-        idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 8000,
-      });
+      this.pool = createPgPool(this.databaseUrl);
 
       const client = await this.pool.connect();
       try {
