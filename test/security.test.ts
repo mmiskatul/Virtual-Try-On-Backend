@@ -3,7 +3,6 @@ import { db } from '../src/infrastructure/database.js';
 import { requiresSslConnection } from '../src/infrastructure/prisma.js';
 import { sanitizeEnvValue } from '../src/infrastructure/env_manager.js';
 import { sanitizeObject } from '../src/infrastructure/sanitization.js';
-import { config } from '../src/infrastructure/config.js';
 
 const app = createApp('all');
 
@@ -85,14 +84,21 @@ async function runSecurityTests() {
   }
 
   const unauthInternal = await app.inject({ method: 'GET', url: '/api/v1/internal/tenants' });
-  assert(unauthInternal.statusCode === 403, 'GET /api/v1/internal/tenants blocks unauthenticated caller');
+  assert(unauthInternal.statusCode === 401, 'GET /api/v1/internal/tenants blocks unauthenticated caller');
 
-  const keyInternal = await app.inject({
+  const custInternal = await app.inject({
     method: 'GET',
     url: '/api/v1/internal/tenants',
-    headers: { 'x-internal-service-key': config.internalServiceKey },
+    headers: { authorization: `Bearer ${custToken}` },
   });
-  assert(keyInternal.statusCode === 200, 'GET /api/v1/internal/tenants allows internal service key');
+  assert(custInternal.statusCode === 403, 'GET /api/v1/internal/tenants blocks non-admin caller');
+
+  const adminInternal = await app.inject({
+    method: 'GET',
+    url: '/api/v1/internal/tenants',
+    headers: { authorization: `Bearer ${adminToken}` },
+  });
+  assert(adminInternal.statusCode === 200, 'GET /api/v1/internal/tenants allows Super Admin token');
 
   const pubStorefront = await app.inject({ method: 'GET', url: '/api/v1/internal/storefront/aura-atelier' });
   const pubStorefrontBody = JSON.parse(pubStorefront.body);
@@ -194,3 +200,4 @@ runSecurityTests().catch((err) => {
   console.error('Fatal security test error:', err);
   process.exit(1);
 });
+

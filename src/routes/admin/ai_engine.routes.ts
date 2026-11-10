@@ -32,11 +32,6 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
           configured: Boolean(config.falKey),
           maskedKey: maskSecret(config.falKey),
         },
-        external: {
-          configured: Boolean(config.vtonApiKey),
-          maskedKey: maskSecret(config.vtonApiKey),
-          apiUrl: config.vtonApiUrl || '',
-        },
         cloudinary: {
           configured: cloudinaryStorage.isConfigured(),
           cloudName: config.cloudinaryCloudName || '',
@@ -66,12 +61,6 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
             description: 'High-performance CPU/GPU local vision engine. Guaranteed instant zero-cost fallback.',
             status: 'ready',
           },
-          {
-            id: 'external',
-            name: 'Custom / External VTON Cloud API',
-            description: 'Forward requests to Fashn.ai, Replicate IDM-VTON, or your custom VTON HTTP endpoint.',
-            status: config.vtonApiKey || config.vtonApiUrl ? 'ready' : 'key_required',
-          },
         ],
         aiServiceEngineUrl: config.aiServiceUrl,
         aiServiceCapabilities,
@@ -90,13 +79,10 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
         geminiApiKey,
         geminiModel,
         falKey,
-        vtonApiKey,
-        vtonApiUrl,
         cloudinaryCloudName,
         cloudinaryApiKey,
         cloudinaryApiSecret,
         cloudinaryFolder,
-        cloudinaryUrl,
       } = body;
 
       const envUpdates: Record<string, string> = {};
@@ -104,8 +90,6 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
       if (typeof activeProvider === 'string' && activeProvider.trim()) {
         const val = sanitizeEnvValue(activeProvider);
         config.vtonProvider = val;
-        process.env.VTON_PROVIDER = val;
-        envUpdates.VTON_PROVIDER = val;
       }
       if (typeof geminiApiKey === 'string' && geminiApiKey.trim() && !isMaskedPlaceholder(geminiApiKey)) {
         const val = sanitizeEnvValue(geminiApiKey);
@@ -124,18 +108,6 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
         config.falKey = val;
         process.env.FAL_KEY = val;
         envUpdates.FAL_KEY = val;
-      }
-      if (typeof vtonApiKey === 'string' && vtonApiKey.trim() && !isMaskedPlaceholder(vtonApiKey)) {
-        const val = sanitizeEnvValue(vtonApiKey);
-        config.vtonApiKey = val;
-        process.env.VTON_API_KEY = val;
-        envUpdates.VTON_API_KEY = val;
-      }
-      if (vtonApiUrl !== undefined && typeof vtonApiUrl === 'string') {
-        const val = sanitizeEnvValue(vtonApiUrl);
-        config.vtonApiUrl = val;
-        process.env.VTON_API_URL = val;
-        envUpdates.VTON_API_URL = val;
       }
       if (cloudinaryCloudName !== undefined && typeof cloudinaryCloudName === 'string') {
         const val = sanitizeEnvValue(cloudinaryCloudName);
@@ -160,12 +132,6 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
         config.cloudinaryFolder = val;
         process.env.CLOUDINARY_FOLDER = val;
         envUpdates.CLOUDINARY_FOLDER = val;
-      }
-      if (typeof cloudinaryUrl === 'string' && cloudinaryUrl.trim() && !isMaskedPlaceholder(cloudinaryUrl)) {
-        const val = sanitizeEnvValue(cloudinaryUrl);
-        config.cloudinaryUrl = val;
-        process.env.CLOUDINARY_URL = val;
-        envUpdates.CLOUDINARY_URL = val;
       }
 
       cloudinaryStorage.reload();
@@ -198,11 +164,6 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
           fal: {
             configured: Boolean(config.falKey),
             maskedKey: maskSecret(config.falKey),
-          },
-          external: {
-            configured: Boolean(config.vtonApiKey),
-            maskedKey: maskSecret(config.vtonApiKey),
-            apiUrl: config.vtonApiUrl,
           },
         },
       });
@@ -284,7 +245,7 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
           provider: 'cloudinary',
           message: isReady
             ? `✅ Cloudinary storage is active and ready. Try-on results will upload automatically to '${config.cloudinaryFolder}/results'.`
-            : `⚠️ Cloudinary credentials incomplete. Please set CLOUDINARY_URL or Cloud Name, API Key, and API Secret in backend/.env.`,
+            : `⚠️ Cloudinary credentials incomplete. Please set Cloud Name, API Key, and API Secret in backend/.env.`,
         });
       }
 

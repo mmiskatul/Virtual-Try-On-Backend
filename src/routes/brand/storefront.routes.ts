@@ -1,8 +1,6 @@
-import crypto from 'node:crypto';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
-import { config } from '../../infrastructure/config.js';
 import { StorefrontSettings, Tenant } from '../../domain/types.js';
 
 const brandReadGuards = [authenticateToken, requireRole('BRAND_OWNER', 'STORE_MANAGER')];
@@ -16,14 +14,6 @@ function isSafeHttpUrl(url: unknown): url is string {
   } catch {
     return false;
   }
-}
-
-function isValidInternalKey(headerValue: unknown): boolean {
-  if (typeof headerValue !== 'string' || !headerValue) return false;
-  const expected = Buffer.from(config.internalServiceKey);
-  const actual = Buffer.from(headerValue);
-  if (expected.length !== actual.length) return false;
-  return crypto.timingSafeEqual(expected, actual);
 }
 
 function sanitizeStorefrontSettings(raw: any, existing?: StorefrontSettings): StorefrontSettings {
@@ -142,28 +132,12 @@ export async function brandStorefrontRoutes(app: FastifyInstance) {
     };
   });
 
-  // Internal Tenants Directory (protected by x-internal-service-key or SUPER_ADMIN bearer token)
-  app.get('/api/v1/internal/tenants', async (request: FastifyRequest, reply: FastifyReply) => {
-    const internalKey = request.headers['x-internal-service-key'];
-    if (isValidInternalKey(internalKey)) {
+  // Internal Tenants Directory (protected by SUPER_ADMIN bearer token)
+  app.get(
+    '/api/v1/internal/tenants',
+    { preHandler: [authenticateToken, requireRole('SUPER_ADMIN')] },
+    async () => {
       return { tenants: db.getTenants() };
     }
-
-    const authHeader = request.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      try {
-        const decoded = request.server.jwt.verify<any>(authHeader.substring(7));
-        if (decoded?.role === 'SUPER_ADMIN') {
-          return { tenants: db.getTenants() };
-        }
-      } catch {
-        // Fall through to 401/403
-      }
-    }
-
-    return reply.status(403).send({
-      error: 'Forbidden',
-      message: 'Internal service key or Super Admin authorization required.',
-    });
-  });
+  );
 }

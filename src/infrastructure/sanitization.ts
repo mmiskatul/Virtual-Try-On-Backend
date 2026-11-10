@@ -4,15 +4,10 @@ const RAW_SECRET_KEYS = new Set([
   'confirmPassword',
   'currentPassword',
   'smtpPass',
+  'pass',
   'geminiApiKey',
   'falKey',
-  'vtonApiKey',
   'cloudinaryApiSecret',
-  'cloudinaryUrl',
-  'resendApiKey',
-  'supabaseServiceRoleKey',
-  'supabaseAnonKey',
-  'supabaseDbUrl',
   'databaseUrl',
 ]);
 

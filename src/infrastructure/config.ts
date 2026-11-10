@@ -25,49 +25,34 @@ if (fs.existsSync(envPath)) {
 export const config = {
   host: process.env.HOST || '0.0.0.0',
   port: Number(process.env.PORT || 4000),
-  brandApiPort: Number(process.env.PORT || 4000),
-  marketplaceApiPort: Number(process.env.PORT || 4000),
-  superAdminApiPort: Number(process.env.PORT || 4000),
-  
   jwtSecret: process.env.JWT_SECRET || 'vton_unified_jwt_secret_production_ready_2026',
-  passwordSalt: process.env.PASSWORD_SALT || 'vton_production_salt_secure_2026',
-  internalServiceKey: process.env.INTERNAL_SERVICE_KEY || 'vton_internal_service_key_enterprise',
 
+  // AI Service & Vision Providers
   aiServiceUrl: process.env.AI_SERVICE_URL || 'http://localhost:8000',
-  databaseUrl: process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || process.env.NEON_DATABASE_URL || '',
-  supabaseUrl: process.env.SUPABASE_URL || '',
-  supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
-  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-  supabaseDbUrl: process.env.SUPABASE_DB_URL || '',
+  geminiApiKey: process.env.GEMINI_API_KEY || '',
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-latest',
+  falKey: process.env.FAL_KEY || '',
+  vtonProvider: 'gemini', // Runtime selector updated via Super Admin AI Engine UI
 
-  cloudinaryUrl: process.env.CLOUDINARY_URL || '',
+  // Database (Supabase PostgreSQL / PostgreSQL)
+  databaseUrl: process.env.DATABASE_URL || '',
+
+  // Cloudinary Image Storage
   cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || '',
   cloudinaryApiKey: process.env.CLOUDINARY_API_KEY || '',
   cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || '',
   cloudinaryFolder: process.env.CLOUDINARY_FOLDER || 'virtual-try-on',
 
-  // Google Gemini Multimodal Vision & Fashion Synthesis
-  geminiApiKey: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || '',
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-flash-latest',
-
-  // External AI Virtual Try-On API (Fal.ai, Fashn.ai, Replicate, Kling, Segmind, or custom)
-  falKey: process.env.FAL_KEY || process.env.FAL_API_KEY || '',
-  vtonApiKey: process.env.VTON_API_KEY || process.env.FAL_KEY || process.env.FASHN_API_KEY || process.env.REPLICATE_API_TOKEN || '',
-  vtonApiUrl: process.env.VTON_API_URL || '',
-  vtonProvider: process.env.VTON_PROVIDER || 'gemini',
-
-  // Frontend Portal Origins (used for verification & password reset links)
-  marketplaceUrl: process.env.MARKETPLACE_URL || 'http://localhost:3000',
-  brandDashboardUrl: process.env.BRAND_DASHBOARD_URL || 'http://localhost:3001',
-  superAdminUrl: process.env.SUPER_ADMIN_URL || 'http://localhost:3002',
-
-  // Email Delivery (Resend or SMTP; falls back to dev console/preview when unset in non-production)
-  resendApiKey: process.env.RESEND_API_KEY || '',
+  // SMTP Email Configuration
   smtpHost: process.env.SMTP_HOST || '',
   smtpPort: Number(process.env.SMTP_PORT || 587),
   smtpSecure: process.env.SMTP_SECURE === 'true',
   smtpUser: process.env.SMTP_USER || '',
   smtpPass: process.env.SMTP_PASS || '',
-  emailFrom: process.env.EMAIL_FROM || 'V-TRY Studio <noreply@v-try.fashion>',
-  devEmailPreview: process.env.DEV_EMAIL_PREVIEW !== 'false'
+  emailFrom: process.env.SMTP_FROM || 'V-TRY Studio <noreply@v-try.fashion>',
+
+  // Default Frontend Portal Origins (for email links)
+  marketplaceUrl: 'http://localhost:3000',
+  brandDashboardUrl: 'http://localhost:3001',
+  superAdminUrl: 'http://localhost:3002',
 };

@@ -70,12 +70,11 @@ class EmailService {
   private smtpTransporter: Transporter | null = null;
 
   public hasRealTransport(): boolean {
-    return Boolean(config.resendApiKey || config.smtpHost);
+    return Boolean(config.smtpHost);
   }
 
-  public getActiveTransport(): 'smtp' | 'resend' | 'dev-preview' {
+  public getActiveTransport(): 'smtp' | 'dev-preview' {
     if (config.smtpHost) return 'smtp';
-    if (config.resendApiKey) return 'resend';
     return 'dev-preview';
   }
 
@@ -91,7 +90,7 @@ class EmailService {
   }
 
   public isDevPreviewAllowed(): boolean {
-    return process.env.NODE_ENV !== 'production' && config.devEmailPreview && !this.hasRealTransport();
+    return process.env.NODE_ENV !== 'production' && !this.hasRealTransport();
   }
 
   public getPortalBaseUrl(portal: AuthPortal): string {
@@ -209,29 +208,15 @@ class EmailService {
       }
     }
 
-    if (config.resendApiKey) {
-      const res = await this.dispatch({
-        to,
-        subject: 'V-TRY Platform — Resend Email Delivery Test',
-        html: '<p>Your Resend email delivery pipeline is working properly.</p>',
-        text: 'Your Resend email delivery pipeline is working properly.',
-      });
-      return {
-        success: res.delivered,
-        provider: res.provider,
-        message: `Test email dispatched via ${res.provider} to ${to}.`,
-      };
-    }
-
     return {
       success: false,
       provider: 'dev-preview',
-      message: 'No SMTP host or Resend API key configured. Enter SMTP details to test live email delivery.',
+      message: 'No SMTP host configured. Enter SMTP details to test live email delivery.',
     };
   }
 
   private async dispatch(payload: BaseMailPayload): Promise<EmailSendResult> {
-    // 1. Nodemailer SMTP (preferred when SMTP_HOST is configured)
+    // 1. Nodemailer SMTP (when SMTP_HOST is configured)
     const transporter = this.getSmtpTransporter();
     if (transporter) {
       try {
@@ -248,34 +233,7 @@ class EmailService {
       }
     }
 
-    // 2. Resend HTTP API
-    if (config.resendApiKey) {
-      try {
-        const res = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${config.resendApiKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            from: config.emailFrom,
-            to: [payload.to],
-            subject: payload.subject,
-            html: payload.html,
-            text: payload.text,
-          }),
-        });
-        if (res.ok) {
-          return { delivered: true, provider: 'resend' };
-        }
-        const errText = await res.text().catch(() => '');
-        console.warn(`[EmailService] Resend API returned ${res.status}: ${errText}`);
-      } catch (err: any) {
-        console.warn('[EmailService] Resend dispatch error:', err?.message || err);
-      }
-    }
-
-    // 3. Development Preview Fallback
+    // 2. Development Preview Fallback
     console.log('\n================ [EmailService - Dev Preview] ================');
     console.log(`To:      ${payload.to}`);
     console.log(`Subject: ${payload.subject}`);

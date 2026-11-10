@@ -15,11 +15,7 @@ export class CloudinaryStorage {
   }
 
   private init() {
-    if (config.cloudinaryUrl) {
-      cloudinary.config({ cloudinary_url: config.cloudinaryUrl });
-      this.configured = true;
-      console.log('[Cloudinary] Configured via CLOUDINARY_URL.');
-    } else if (config.cloudinaryCloudName && config.cloudinaryApiKey && config.cloudinaryApiSecret) {
+    if (config.cloudinaryCloudName && config.cloudinaryApiKey && config.cloudinaryApiSecret) {
       cloudinary.config({
         cloud_name: config.cloudinaryCloudName,
         api_key: config.cloudinaryApiKey,
@@ -34,9 +30,8 @@ export class CloudinaryStorage {
     }
   }
 
-  public reload(newConfig?: { cloudinaryUrl?: string; cloudName?: string; apiKey?: string; apiSecret?: string }): boolean {
+  public reload(newConfig?: { cloudName?: string; apiKey?: string; apiSecret?: string }): boolean {
     if (newConfig) {
-      if (newConfig.cloudinaryUrl) config.cloudinaryUrl = newConfig.cloudinaryUrl;
       if (newConfig.cloudName) config.cloudinaryCloudName = newConfig.cloudName;
       if (newConfig.apiKey) config.cloudinaryApiKey = newConfig.apiKey;
       if (newConfig.apiSecret) config.cloudinaryApiSecret = newConfig.apiSecret;

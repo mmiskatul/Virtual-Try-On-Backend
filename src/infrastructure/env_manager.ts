@@ -2,32 +2,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const ALLOWED_ENV_KEYS = new Set([
-  'VTON_PROVIDER',
+  'HOST',
+  'PORT',
+  'JWT_SECRET',
+  'AI_SERVICE_URL',
   'GEMINI_API_KEY',
   'GEMINI_MODEL',
   'FAL_KEY',
-  'VTON_API_KEY',
-  'VTON_API_URL',
+  'DATABASE_URL',
   'CLOUDINARY_CLOUD_NAME',
   'CLOUDINARY_API_KEY',
   'CLOUDINARY_API_SECRET',
   'CLOUDINARY_FOLDER',
-  'CLOUDINARY_URL',
   'SMTP_HOST',
   'SMTP_PORT',
   'SMTP_SECURE',
   'SMTP_USER',
   'SMTP_PASS',
-  'EMAIL_FROM',
-  'RESEND_API_KEY',
-  'MARKETPLACE_URL',
-  'BRAND_DASHBOARD_URL',
-  'SUPER_ADMIN_URL',
-  'DATABASE_URL',
-  'SUPABASE_DB_URL',
-  'SUPABASE_URL',
-  'SUPABASE_ANON_KEY',
-  'SUPABASE_SERVICE_ROLE_KEY',
+  'SMTP_FROM',
 ]);
 
 /**
@@ -43,7 +35,7 @@ export function sanitizeEnvValue(value: unknown): string {
 export function isMaskedPlaceholder(value: unknown): boolean {
   if (typeof value !== 'string') return false;
   const trimmed = value.trim();
-  return trimmed.includes('...') && trimmed.length < 24;
+  return (trimmed.includes('••••') || trimmed.includes('...')) && trimmed.length < 32;
 }
 
 export function maskSecret(value?: string): string {

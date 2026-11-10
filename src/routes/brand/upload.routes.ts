@@ -68,7 +68,7 @@ export async function brandUploadRoutes(app: FastifyInstance) {
         provider: 'local_memory_fallback',
         url: base64Data,
         filename: data.filename,
-        note: 'Cloudinary credentials not set in .env; set CLOUDINARY_URL or CLOUDINARY_CLOUD_NAME to store in cloud.'
+        note: 'Cloudinary credentials not set in .env; set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET to store in cloud.'
       });
     }
 

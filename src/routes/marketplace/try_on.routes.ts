@@ -47,7 +47,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
       mode: isExternal ? 'external_api' : 'local_ai_service',
       provider,
       externalConfigured: isExternal,
-      engineUrl: isExternal ? (config.vtonApiUrl || `Cloud API (${provider})`) : config.aiServiceUrl,
+      engineUrl: isExternal ? `Cloud API (${provider})` : config.aiServiceUrl,
       status: 'ready'
     };
   });

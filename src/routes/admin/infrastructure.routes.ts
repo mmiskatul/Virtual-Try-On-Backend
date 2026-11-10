@@ -35,27 +35,6 @@ function isValidPostgresUri(uri: string): boolean {
   }
 }
 
-function isSafeHttpsSupabaseUrl(url: string): boolean {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'https:') return false;
-    const host = parsed.hostname.toLowerCase();
-    if (
-      host === 'localhost' ||
-      host === '127.0.0.1' ||
-      host.startsWith('10.') ||
-      host.startsWith('192.168.') ||
-      host.startsWith('169.254.') ||
-      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
-    ) {
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 export async function adminInfrastructureRoutes(app: FastifyInstance) {
   // 1. Read Masked SMTP + Supabase / Database Configuration
   app.get('/api/v1/admin/infrastructure/config', { preHandler: adminGuards }, async () => {
@@ -74,13 +53,6 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
         hasPass: Boolean(config.smtpPass),
         maskedPass: maskSecret(config.smtpPass),
         from: config.emailFrom || 'V-TRY Studio <noreply@v-try.fashion>',
-        resendConfigured: Boolean(config.resendApiKey),
-        maskedResendKey: maskSecret(config.resendApiKey),
-      },
-      portals: {
-        marketplaceUrl: config.marketplaceUrl,
-        brandDashboardUrl: config.brandDashboardUrl,
-        superAdminUrl: config.superAdminUrl,
       },
       database: {
         provider: db.getDatabaseProviderLabel(),
@@ -90,11 +62,6 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
         dbHost: extractHost(config.databaseUrl),
         hasDatabaseUrl: Boolean(config.databaseUrl),
         maskedDatabaseUrl: maskConnectionString(config.databaseUrl),
-        supabaseUrl: config.supabaseUrl || '',
-        hasAnonKey: Boolean(config.supabaseAnonKey),
-        maskedAnonKey: maskSecret(config.supabaseAnonKey),
-        hasServiceRoleKey: Boolean(config.supabaseServiceRoleKey),
-        maskedServiceRoleKey: maskSecret(config.supabaseServiceRoleKey),
         tableCounts: counts,
         snapshotCounts: {
           tenants: db.getTenants().length,
@@ -106,7 +73,7 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
     };
   });
 
-  // 2. Save & Live-Reload SMTP + Portal Links
+  // 2. Save & Live-Reload SMTP Configuration
   app.post('/api/v1/admin/infrastructure/smtp', { preHandler: adminGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     const body = (request.body as any) || {};
     const envUpdates: Record<string, string> = {};
@@ -150,32 +117,8 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
     if (typeof body.from === 'string' && body.from.trim()) {
       const val = sanitizeEnvValue(body.from);
       config.emailFrom = val;
-      process.env.EMAIL_FROM = val;
-      envUpdates.EMAIL_FROM = val;
-    }
-    if (typeof body.resendApiKey === 'string' && body.resendApiKey.trim() && !isMaskedPlaceholder(body.resendApiKey)) {
-      const val = sanitizeEnvValue(body.resendApiKey);
-      config.resendApiKey = val;
-      process.env.RESEND_API_KEY = val;
-      envUpdates.RESEND_API_KEY = val;
-    }
-    if (typeof body.marketplaceUrl === 'string' && body.marketplaceUrl.trim()) {
-      const val = sanitizeEnvValue(body.marketplaceUrl);
-      config.marketplaceUrl = val;
-      process.env.MARKETPLACE_URL = val;
-      envUpdates.MARKETPLACE_URL = val;
-    }
-    if (typeof body.brandDashboardUrl === 'string' && body.brandDashboardUrl.trim()) {
-      const val = sanitizeEnvValue(body.brandDashboardUrl);
-      config.brandDashboardUrl = val;
-      process.env.BRAND_DASHBOARD_URL = val;
-      envUpdates.BRAND_DASHBOARD_URL = val;
-    }
-    if (typeof body.superAdminUrl === 'string' && body.superAdminUrl.trim()) {
-      const val = sanitizeEnvValue(body.superAdminUrl);
-      config.superAdminUrl = val;
-      process.env.SUPER_ADMIN_URL = val;
-      envUpdates.SUPER_ADMIN_URL = val;
+      process.env.SMTP_FROM = val;
+      envUpdates.SMTP_FROM = val;
     }
 
     emailService.reloadTransport();
@@ -197,7 +140,7 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
     return {
       success: true,
       activeTransport: emailService.getActiveTransport(),
-      message: 'SMTP & email delivery configuration updated and reloaded.',
+      message: 'SMTP email delivery configuration updated and reloaded.',
     };
   });
 
@@ -243,11 +186,6 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
         ? sanitizeEnvValue(body.databaseUrl)
         : config.databaseUrl;
 
-    const candidateSupabaseUrl =
-      typeof body.supabaseUrl === 'string' && body.supabaseUrl.trim()
-        ? sanitizeEnvValue(body.supabaseUrl)
-        : config.supabaseUrl;
-
     if (!candidateDbUrl) {
       return reply.status(400).send({
         success: false,
@@ -270,19 +208,6 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
       const health = prismaConnected ? await tempPrisma.checkHealth() : await tempSql.checkHealth();
       const counts = prismaConnected ? await tempPrisma.getTableCounts().catch(() => null) : null;
 
-      let supabaseRestOk: boolean | null = null;
-      if (candidateSupabaseUrl && isSafeHttpsSupabaseUrl(candidateSupabaseUrl)) {
-        try {
-          const restRes = await fetch(`${candidateSupabaseUrl.replace(/\/$/, '')}/rest/v1/`, {
-            headers: config.supabaseAnonKey ? { apikey: config.supabaseAnonKey } : undefined,
-            signal: AbortSignal.timeout(4000),
-          });
-          supabaseRestOk = restRes.status < 500;
-        } catch {
-          supabaseRestOk = false;
-        }
-      }
-
       if (!sqlConnected && !prismaConnected) {
         return reply.status(400).send({
           success: false,
@@ -293,7 +218,6 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
       return {
         success: true,
         latencyMs: health.latencyMs,
-        supabaseRestOk,
         counts,
         message: `Connected successfully in ${health.latencyMs}ms! Schema verified (${counts ? `${counts.tenants} tenants, ${counts.users} users` : 'SQL ready'}).`,
       };
@@ -324,42 +248,8 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
       }
       nextDbUrl = cleaned;
       config.databaseUrl = cleaned;
-      config.supabaseDbUrl = cleaned;
       process.env.DATABASE_URL = cleaned;
-      process.env.SUPABASE_DB_URL = cleaned;
       envUpdates.DATABASE_URL = cleaned;
-      envUpdates.SUPABASE_DB_URL = cleaned;
-    }
-
-    if (typeof body.supabaseUrl === 'string') {
-      const cleaned = sanitizeEnvValue(body.supabaseUrl);
-      if (cleaned && !isSafeHttpsSupabaseUrl(cleaned)) {
-        return reply.status(400).send({
-          error: 'ValidationError',
-          message: 'Supabase Project URL must be a valid public https:// URL (e.g. https://xyz.supabase.co).',
-        });
-      }
-      config.supabaseUrl = cleaned;
-      process.env.SUPABASE_URL = cleaned;
-      envUpdates.SUPABASE_URL = cleaned;
-    }
-
-    if (typeof body.supabaseAnonKey === 'string' && body.supabaseAnonKey.trim() && !isMaskedPlaceholder(body.supabaseAnonKey)) {
-      const cleaned = sanitizeEnvValue(body.supabaseAnonKey);
-      config.supabaseAnonKey = cleaned;
-      process.env.SUPABASE_ANON_KEY = cleaned;
-      envUpdates.SUPABASE_ANON_KEY = cleaned;
-    }
-
-    if (
-      typeof body.supabaseServiceRoleKey === 'string' &&
-      body.supabaseServiceRoleKey.trim() &&
-      !isMaskedPlaceholder(body.supabaseServiceRoleKey)
-    ) {
-      const cleaned = sanitizeEnvValue(body.supabaseServiceRoleKey);
-      config.supabaseServiceRoleKey = cleaned;
-      process.env.SUPABASE_SERVICE_ROLE_KEY = cleaned;
-      envUpdates.SUPABASE_SERVICE_ROLE_KEY = cleaned;
     }
 
     updateEnvFile(envUpdates);
@@ -416,3 +306,4 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
     }
   });
 }
+

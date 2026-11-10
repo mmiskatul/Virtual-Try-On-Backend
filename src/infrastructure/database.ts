@@ -293,12 +293,7 @@ export class Database {
         return crypto.timingSafeEqual(derivedBuf, expectedBuf);
       }
 
-      // Backward-compatible verification for legacy SHA-256 hashes
-      const legacyHex = crypto.createHash('sha256').update(password + config.passwordSalt).digest('hex');
-      const a = Buffer.from(legacyHex, 'hex');
-      const b = Buffer.from(storedHash, 'hex');
-      if (a.length !== b.length) return false;
-      return crypto.timingSafeEqual(a, b);
+      return false;
     } catch {
       return false;
     }
