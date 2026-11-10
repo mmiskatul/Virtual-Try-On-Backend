@@ -1,5 +1,7 @@
 export type TenantStatus = 'ACTIVE' | 'SUSPENDED' | 'PENDING_VERIFICATION';
 export type UserRole = 'SUPER_ADMIN' | 'BRAND_OWNER' | 'STORE_MANAGER' | 'CUSTOMER';
+export type AuthPortal = 'marketplace' | 'brand' | 'admin';
+export type AuthTokenType = 'EMAIL_VERIFICATION' | 'PASSWORD_RESET';
 export type TryOnCategory = 'tops' | 'bottoms' | 'dresses' | 'outerwear' | 'all';
 export type OrderStatus = 'PENDING' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED';
 export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
@@ -34,6 +36,22 @@ export interface User {
   email: string;
   passwordHash: string;
   role: UserRole;
+  emailVerified?: boolean;
+  emailVerifiedAt?: number;
+  updatedAt?: number;
+  createdAt: number;
+}
+
+export interface AuthToken {
+  id: string;
+  userId: string;
+  email: string;
+  type: AuthTokenType;
+  tokenHash: string;
+  otpCodeHash?: string;
+  portal: AuthPortal;
+  expiresAt: number;
+  usedAt?: number;
   createdAt: number;
 }
 

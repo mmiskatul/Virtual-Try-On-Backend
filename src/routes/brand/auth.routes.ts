@@ -2,32 +2,67 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken } from '../../infrastructure/auth.guard.js';
 import { Tenant } from '../../domain/types.js';
+import {
+  dispatchVerificationForUser,
+  isValidEmail,
+  normalizeEmail,
+  registerSharedAuthRoutes,
+  sanitizePublicUser,
+  validateStrongPassword,
+} from '../auth/auth.service.js';
 
 export async function brandAuthRoutes(app: FastifyInstance) {
-  // Brand Registration
+  // Brand Registration (with Email Verification)
   app.post('/api/v1/auth/register', async (request: FastifyRequest, reply: FastifyReply) => {
-    const body = request.body as any;
-    const { brandName, slug, email, password, ownerName } = body || {};
+    const body = (request.body as any) || {};
+    const brandName = typeof body.brandName === 'string' ? body.brandName.trim() : '';
+    const slug = typeof body.slug === 'string' ? body.slug : '';
+    const rawEmail = typeof body.email === 'string' ? body.email : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+    const ownerName = typeof body.ownerName === 'string' ? body.ownerName.trim() : '';
 
-    if (!brandName || !slug || !email || !password || !ownerName) {
+    if (!brandName || !slug || !rawEmail || !password || !ownerName) {
       return reply.status(400).send({
         error: 'ValidationError',
-        message: 'All fields (brandName, slug, email, password, ownerName) are required.'
+        message: 'All fields (brandName, slug, email, password, ownerName) are required.',
       });
     }
 
-    const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
+    const email = normalizeEmail(rawEmail);
+    if (!isValidEmail(email)) {
+      return reply.status(400).send({
+        error: 'ValidationError',
+        message: 'Please provide a valid business email address.',
+      });
+    }
+
+    const passwordError = validateStrongPassword(password);
+    if (passwordError) {
+      return reply.status(400).send({
+        error: 'ValidationError',
+        message: passwordError,
+      });
+    }
+
+    const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '');
+    if (cleanSlug.length < 2) {
+      return reply.status(400).send({
+        error: 'ValidationError',
+        message: 'Storefront slug must contain at least 2 alphanumeric characters.',
+      });
+    }
+
     if (db.getTenantBySlug(cleanSlug)) {
       return reply.status(409).send({
         error: 'ConflictError',
-        message: `Brand slug '${cleanSlug}' is already registered.`
+        message: `Brand slug '${cleanSlug}' is already registered.`,
       });
     }
 
     if (db.getUserByEmail(email)) {
       return reply.status(409).send({
         error: 'ConflictError',
-        message: `Email '${email}' is already in use.`
+        message: `Email '${email}' is already in use.`,
       });
     }
 
@@ -43,10 +78,10 @@ export async function brandAuthRoutes(app: FastifyInstance) {
         primaryColor: '#0f172a',
         accentColor: '#38bdf8',
         announcement: 'Welcome to our brand new storefront!',
-        aboutText: `Welcome to ${brandName}.`
+        aboutText: `Welcome to ${brandName}.`,
       },
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
     };
     db.createTenant(tenant);
 
@@ -57,29 +92,61 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       email,
       passwordHash: db.hashPassword(password),
       role: 'BRAND_OWNER',
-      createdAt: now
+      emailVerified: false,
+      createdAt: now,
     });
 
-    const token = app.jwt.sign({ userId: user.id, role: user.role, tenantId: tenant.id });
+    const mailResult = await dispatchVerificationForUser(user, 'brand');
+
+    db.recordAuditLog({
+      tenantId: tenant.id,
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'BRAND_REGISTERED',
+      entity: 'Tenant',
+      entityId: tenant.id,
+      details: { brandName: tenant.name, slug: tenant.slug, email: user.email },
+    });
 
     return reply.status(201).send({
-      message: 'Brand registered successfully',
-      token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
-      tenant
+      message: 'Brand registered! Please verify your email address before signing in.',
+      requiresEmailVerification: true,
+      user: sanitizePublicUser(user),
+      tenant,
+      ...(mailResult.preview ? { devPreview: mailResult.preview } : {}),
     });
   });
 
   // Brand Owner Login
   app.post('/api/v1/auth/login', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { email, password } = (request.body as any) || {};
-    if (!email || !password) {
+    const body = (request.body as any) || {};
+    const rawEmail = typeof body.email === 'string' ? body.email : '';
+    const password = typeof body.password === 'string' ? body.password : '';
+
+    if (!rawEmail || !password) {
       return reply.status(400).send({ error: 'ValidationError', message: 'Email and password are required' });
     }
 
+    const email = normalizeEmail(rawEmail);
     const user = db.getUserByEmail(email);
-    if (!user || user.passwordHash !== db.hashPassword(password)) {
+    if (!user || !db.verifyPassword(password, user.passwordHash)) {
       return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid email or password' });
+    }
+
+    if (user.role !== 'BRAND_OWNER' && user.role !== 'STORE_MANAGER') {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        message: 'Access restricted to Brand Merchant accounts. Please use the appropriate portal.',
+      });
+    }
+
+    if (!user.emailVerified) {
+      return reply.status(403).send({
+        error: 'EmailNotVerified',
+        code: 'EMAIL_NOT_VERIFIED',
+        message: 'Please verify your email address before signing in.',
+        email: user.email,
+      });
     }
 
     let tenant: Tenant | undefined = undefined;
@@ -88,9 +155,13 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       if (tenant && tenant.status !== 'ACTIVE') {
         return reply.status(403).send({
           error: 'TenantSuspended',
-          message: 'Your brand account has been suspended by platform administration.'
+          message: 'Your brand account has been suspended by platform administration.',
         });
       }
+    }
+
+    if (!user.passwordHash.startsWith('scrypt$')) {
+      db.updateUser(user.id, { passwordHash: db.hashPassword(password) });
     }
 
     const token = app.jwt.sign({ userId: user.id, role: user.role, tenantId: user.tenantId });
@@ -98,21 +169,19 @@ export async function brandAuthRoutes(app: FastifyInstance) {
     return {
       message: 'Login successful',
       token,
-      user: { id: user.id, name: user.name, email: user.email, role: user.role },
-      tenant
+      user: sanitizePublicUser(user),
+      tenant,
     };
   });
 
   // Authenticated Brand Profile / Me
   app.get('/api/v1/auth/me', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
     return {
-      user: {
-        id: request.authUser!.id,
-        name: request.authUser!.name,
-        email: request.authUser!.email,
-        role: request.authUser!.role
-      },
-      tenant: request.tenant
+      user: sanitizePublicUser(request.authUser!),
+      tenant: request.tenant,
     };
   });
+
+  // Email verification, resend, forgot password, reset password routes
+  registerSharedAuthRoutes(app, '/api/v1/auth', 'brand');
 }

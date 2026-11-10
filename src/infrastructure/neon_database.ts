@@ -135,11 +135,22 @@ export class NeonSqlDatabase {
   public async createUser(user: User): Promise<User> {
     if (!this.pool) throw new Error('Database not connected');
     const q = `
-      INSERT INTO users (id, tenant_id, name, email, password_hash, role, created_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      INSERT INTO users (id, tenant_id, name, email, password_hash, role, email_verified, email_verified_at, updated_at, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       RETURNING *
     `;
-    const values = [user.id, user.tenantId || null, user.name, user.email, user.passwordHash, user.role, user.createdAt];
+    const values = [
+      user.id,
+      user.tenantId || null,
+      user.name,
+      user.email,
+      user.passwordHash,
+      user.role,
+      Boolean(user.emailVerified),
+      user.emailVerifiedAt || null,
+      user.updatedAt || null,
+      user.createdAt,
+    ];
     const res = await this.pool.query(q, values);
     return this.mapUser(res.rows[0]);
   }
@@ -261,6 +272,9 @@ export class NeonSqlDatabase {
       email: row.email,
       passwordHash: row.password_hash,
       role: row.role,
+      emailVerified: row.email_verified !== undefined ? Boolean(row.email_verified) : true,
+      emailVerifiedAt: row.email_verified_at ? Number(row.email_verified_at) : undefined,
+      updatedAt: row.updated_at ? Number(row.updated_at) : undefined,
       createdAt: Number(row.created_at)
     };
   }

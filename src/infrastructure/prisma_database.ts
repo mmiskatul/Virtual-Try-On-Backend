@@ -4,6 +4,9 @@ import { createPrismaInstance, disconnectPrisma } from './prisma.js';
 import {
   Tenant,
   User,
+  AuthToken,
+  AuthPortal,
+  AuthTokenType,
   Product,
   Fabric,
   InventoryLog,
@@ -219,10 +222,63 @@ export class PrismaDatabase {
         email: user.email,
         passwordHash: user.passwordHash,
         role: user.role,
+        emailVerified: Boolean(user.emailVerified),
+        emailVerifiedAt: user.emailVerifiedAt ? BigInt(user.emailVerifiedAt) : null,
+        updatedAt: user.updatedAt ? BigInt(user.updatedAt) : null,
         createdAt: BigInt(user.createdAt),
       },
     });
     return this.mapUser(created);
+  }
+
+  public async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
+    if (!this.prisma) return undefined;
+    const data: any = { updatedAt: BigInt(Date.now()) };
+    if (updates.name !== undefined) data.name = updates.name;
+    if (updates.passwordHash !== undefined) data.passwordHash = updates.passwordHash;
+    if (updates.emailVerified !== undefined) data.emailVerified = updates.emailVerified;
+    if (updates.emailVerifiedAt !== undefined) data.emailVerifiedAt = BigInt(updates.emailVerifiedAt);
+    const result = await this.prisma.user.updateMany({
+      where: { id },
+      data,
+    });
+    if (result.count === 0) return undefined;
+    return this.getUserById(id);
+  }
+
+  public async createAuthToken(token: AuthToken): Promise<AuthToken> {
+    if (!this.prisma) throw new Error('Prisma database is not connected');
+    const created = await this.prisma.authToken.create({
+      data: {
+        id: token.id,
+        userId: token.userId,
+        email: token.email,
+        type: token.type,
+        tokenHash: token.tokenHash,
+        otpCodeHash: token.otpCodeHash || null,
+        portal: token.portal,
+        expiresAt: BigInt(token.expiresAt),
+        usedAt: token.usedAt ? BigInt(token.usedAt) : null,
+        createdAt: BigInt(token.createdAt),
+      },
+    });
+    return this.mapAuthToken(created);
+  }
+
+  public async invalidateAuthTokens(userId: string, type: AuthTokenType): Promise<void> {
+    if (!this.prisma) return;
+    await this.prisma.authToken.updateMany({
+      where: { userId, type, usedAt: null },
+      data: { usedAt: BigInt(Date.now()) },
+    });
+  }
+
+  public async markAuthTokenUsed(id: string): Promise<void> {
+    if (!this.prisma) return;
+    await this.prisma.authToken.updateMany({
+      where: { id },
+      data: { usedAt: BigInt(Date.now()) },
+    });
   }
 
   // ==========================================
@@ -622,6 +678,24 @@ export class PrismaDatabase {
       email: row.email,
       passwordHash: row.passwordHash,
       role: row.role as UserRole,
+      emailVerified: Boolean(row.emailVerified),
+      emailVerifiedAt: row.emailVerifiedAt ? Number(row.emailVerifiedAt) : undefined,
+      updatedAt: row.updatedAt ? Number(row.updatedAt) : undefined,
+      createdAt: Number(row.createdAt),
+    };
+  }
+
+  private mapAuthToken(row: any): AuthToken {
+    return {
+      id: row.id,
+      userId: row.userId,
+      email: row.email,
+      type: row.type as AuthTokenType,
+      tokenHash: row.tokenHash,
+      otpCodeHash: row.otpCodeHash || undefined,
+      portal: (row.portal || 'marketplace') as AuthPortal,
+      expiresAt: Number(row.expiresAt),
+      usedAt: row.usedAt ? Number(row.usedAt) : undefined,
       createdAt: Number(row.createdAt),
     };
   }

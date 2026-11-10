@@ -31,14 +31,19 @@ model Tenant {
 
 // 2. Users Table
 model User {
-  id           String   @id @db.VarChar(64)
-  tenantId     String?  @map("tenant_id") @db.VarChar(64)
-  tenant       Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name         String   @db.VarChar(255)
-  email        String   @unique @db.VarChar(255)
-  passwordHash String   @map("password_hash") @db.VarChar(255)
-  role         String   @db.VarChar(64)
-  createdAt    BigInt   @map("created_at")
+  id              String      @id @db.VarChar(64)
+  tenantId        String?     @map("tenant_id") @db.VarChar(64)
+  tenant          Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name            String      @db.VarChar(255)
+  email           String      @unique @db.VarChar(255)
+  passwordHash    String      @map("password_hash") @db.VarChar(255)
+  role            String      @db.VarChar(64)
+  emailVerified   Boolean     @default(false) @map("email_verified")
+  emailVerifiedAt BigInt?     @map("email_verified_at")
+  updatedAt       BigInt?     @map("updated_at")
+  createdAt       BigInt      @map("created_at")
+
+  authTokens      AuthToken[]
 
   @@index([tenantId])
   @@index([email])
@@ -162,4 +167,24 @@ model AuditLog {
 
   @@index([timestamp])
   @@map("audit_logs")
+}
+
+// 9. Auth Tokens Table (Email Verification & Password Reset)
+model AuthToken {
+  id          String  @id @db.VarChar(64)
+  userId      String  @map("user_id") @db.VarChar(64)
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  email       String  @db.VarChar(255)
+  type        String  @db.VarChar(32)
+  tokenHash   String  @map("token_hash") @db.VarChar(128)
+  otpCodeHash String? @map("otp_code_hash") @db.VarChar(128)
+  portal      String  @default("marketplace") @db.VarChar(32)
+  expiresAt   BigInt  @map("expires_at")
+  usedAt      BigInt? @map("used_at")
+  createdAt   BigInt  @map("created_at")
+
+  @@index([userId])
+  @@index([email])
+  @@index([tokenHash])
+  @@map("auth_tokens")
 }

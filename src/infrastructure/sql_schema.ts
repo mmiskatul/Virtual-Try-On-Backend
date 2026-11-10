@@ -27,8 +27,14 @@ CREATE TABLE IF NOT EXISTS users (
   email VARCHAR(255) UNIQUE NOT NULL,
   password_hash VARCHAR(255) NOT NULL,
   role VARCHAR(64) NOT NULL,
+  email_verified BOOLEAN NOT NULL DEFAULT false,
+  email_verified_at BIGINT,
+  updated_at BIGINT,
   created_at BIGINT NOT NULL
 );
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at BIGINT;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at BIGINT;
 CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON users(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
@@ -134,4 +140,21 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   timestamp BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp);
+
+-- 9. Auth Tokens Table (Email Verification & Password Reset)
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  email VARCHAR(255) NOT NULL,
+  type VARCHAR(32) NOT NULL,
+  token_hash VARCHAR(128) NOT NULL,
+  otp_code_hash VARCHAR(128),
+  portal VARCHAR(32) NOT NULL DEFAULT 'marketplace',
+  expires_at BIGINT NOT NULL,
+  used_at BIGINT,
+  created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id ON auth_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_email ON auth_tokens(email);
+CREATE INDEX IF NOT EXISTS idx_auth_tokens_hash ON auth_tokens(token_hash);
 `;

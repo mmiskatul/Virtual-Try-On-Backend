@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {
-  Tenant, User, Product, Fabric, InventoryLog,
+  Tenant, User, AuthToken, AuthTokenType, Product, Fabric, InventoryLog,
   Subscription, Order, AuditLog
 } from '../domain/types.js';
 import { config } from './config.js';
@@ -12,6 +12,7 @@ import { PrismaDatabase } from './prisma_database.js';
 export interface DatabaseCollections {
   tenants: Tenant[];
   users: User[];
+  authTokens: AuthToken[];
   products: Product[];
   fabrics: Fabric[];
   inventoryLogs: InventoryLog[];
@@ -24,6 +25,7 @@ export class Database {
   private data: DatabaseCollections = {
     tenants: [],
     users: [],
+    authTokens: [],
     products: [],
     fabrics: [],
     inventoryLogs: [],
@@ -36,6 +38,7 @@ export class Database {
   private neonSql: NeonSqlDatabase | null = null;
   private prismaDb: PrismaDatabase | null = null;
   private transactionLock: Promise<void> = Promise.resolve();
+  private prismaSyncQueue: Promise<void> = Promise.resolve();
 
   constructor(customSnapshotPath?: string) {
     this.snapshotPath = customSnapshotPath || path.resolve(process.cwd(), '.data', 'db_snapshot.json');
@@ -97,6 +100,32 @@ export class Database {
         const raw = fs.readFileSync(this.snapshotPath, 'utf-8');
         this.data = JSON.parse(raw);
         if (!this.data.auditLogs) this.data.auditLogs = [];
+        if (!this.data.authTokens) this.data.authTokens = [];
+
+        // Migrate legacy snapshot users that predate emailVerified tracking
+        let migrated = false;
+        for (const u of this.data.users) {
+          if (u.emailVerified === undefined) {
+            u.emailVerified = true;
+            u.emailVerifiedAt = u.createdAt || Date.now();
+            migrated = true;
+          }
+        }
+        if (!this.data.users.some((u) => u.email.toLowerCase() === 'sarah.miller@example.com')) {
+          const now = Date.now();
+          this.data.users.push({
+            id: 'user_customer_sarah',
+            name: 'Sarah Miller',
+            email: 'sarah.miller@example.com',
+            passwordHash: this.hashPassword('password123'),
+            role: 'CUSTOMER',
+            emailVerified: true,
+            emailVerifiedAt: now,
+            createdAt: now
+          });
+          migrated = true;
+        }
+        if (migrated) this.save();
       } else {
         this.seedDemoData();
         this.save();
@@ -121,7 +150,49 @@ export class Database {
   }
 
   public hashPassword(password: string): string {
-    return crypto.createHash('sha256').update(password + config.passwordSalt).digest('hex');
+    const salt = crypto.randomBytes(16).toString('hex');
+    const derived = crypto.scryptSync(password, salt, 64).toString('hex');
+    return `scrypt$${salt}$${derived}`;
+  }
+
+  public verifyPassword(password: string, storedHash: string): boolean {
+    if (!storedHash) return false;
+    try {
+      if (storedHash.startsWith('scrypt$')) {
+        const parts = storedHash.split('$');
+        if (parts.length !== 3) return false;
+        const [, salt, expectedHex] = parts;
+        const derivedBuf = crypto.scryptSync(password, salt, 64);
+        const expectedBuf = Buffer.from(expectedHex, 'hex');
+        if (derivedBuf.length !== expectedBuf.length) return false;
+        return crypto.timingSafeEqual(derivedBuf, expectedBuf);
+      }
+
+      // Backward-compatible verification for legacy SHA-256 hashes
+      const legacyHex = crypto.createHash('sha256').update(password + config.passwordSalt).digest('hex');
+      const a = Buffer.from(legacyHex, 'hex');
+      const b = Buffer.from(storedHash, 'hex');
+      if (a.length !== b.length) return false;
+      return crypto.timingSafeEqual(a, b);
+    } catch {
+      return false;
+    }
+  }
+
+  public hashToken(rawValue: string): string {
+    return crypto.createHash('sha256').update(rawValue).digest('hex');
+  }
+
+  private enqueuePrismaSync(task: (prisma: PrismaDatabase) => Promise<void>): void {
+    this.prismaSyncQueue = this.prismaSyncQueue
+      .then(async () => {
+        if (this.prismaDb && this.prismaDb.isConnected()) {
+          await task(this.prismaDb);
+        }
+      })
+      .catch((err: any) => {
+        console.warn('[Database] Prisma background sync skipped:', err?.message || err);
+      });
   }
 
   public async runTransaction<T>(action: () => Promise<T> | T): Promise<T> {
@@ -192,6 +263,8 @@ export class Database {
       email: 'admin@vton-platform.io',
       passwordHash: this.hashPassword('Admin@123456'),
       role: 'SUPER_ADMIN',
+      emailVerified: true,
+      emailVerifiedAt: now,
       createdAt: now
     };
 
@@ -202,6 +275,8 @@ export class Database {
       email: 'elena@auraatelier.com',
       passwordHash: this.hashPassword('Aura@123456'),
       role: 'BRAND_OWNER',
+      emailVerified: true,
+      emailVerifiedAt: now,
       createdAt: now
     };
 
@@ -212,6 +287,8 @@ export class Database {
       email: 'marcus@voguenova.com',
       passwordHash: this.hashPassword('Vogue@123456'),
       role: 'BRAND_OWNER',
+      emailVerified: true,
+      emailVerifiedAt: now,
       createdAt: now
     };
 
@@ -221,10 +298,24 @@ export class Database {
       email: 'sophia@example.com',
       passwordHash: this.hashPassword('Customer@123456'),
       role: 'CUSTOMER',
+      emailVerified: true,
+      emailVerifiedAt: now,
       createdAt: now
     };
 
-    this.data.users = [superAdmin, brandOwner1, brandOwner2, customerUser];
+    const customerSarah: User = {
+      id: 'user_customer_sarah',
+      name: 'Sarah Miller',
+      email: 'sarah.miller@example.com',
+      passwordHash: this.hashPassword('password123'),
+      role: 'CUSTOMER',
+      emailVerified: true,
+      emailVerifiedAt: now,
+      createdAt: now
+    };
+
+    this.data.users = [superAdmin, brandOwner1, brandOwner2, customerUser, customerSarah];
+    this.data.authTokens = [];
 
     // 3. Seed Fabrics
     const fabric1: Fabric = {
@@ -445,6 +536,9 @@ export class Database {
       updatedAt: Date.now()
     });
     this.save();
+    this.enqueuePrismaSync(async (prisma) => {
+      await prisma.createTenant(tenant);
+    });
     return tenant;
   }
 
@@ -466,7 +560,8 @@ export class Database {
   }
 
   public getUserByEmail(email: string): User | undefined {
-    return this.data.users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    const clean = email.trim().toLowerCase();
+    return this.data.users.find(u => u.email.toLowerCase() === clean);
   }
 
   public getUserById(id: string): User | undefined {
@@ -474,9 +569,107 @@ export class Database {
   }
 
   public createUser(user: User): User {
-    this.data.users.push(user);
+    const normalized: User = {
+      ...user,
+      email: user.email.trim().toLowerCase(),
+      emailVerified: user.emailVerified ?? false
+    };
+    this.data.users.push(normalized);
     this.save();
-    return user;
+    this.enqueuePrismaSync(async (prisma) => {
+      await prisma.createUser(normalized);
+    });
+    return normalized;
+  }
+
+  public updateUser(id: string, updates: Partial<User>): User | undefined {
+    const idx = this.data.users.findIndex(u => u.id === id);
+    if (idx === -1) return undefined;
+    this.data.users[idx] = {
+      ...this.data.users[idx],
+      ...updates,
+      updatedAt: Date.now()
+    };
+    this.save();
+    this.enqueuePrismaSync(async (prisma) => {
+      await prisma.updateUser(id, updates);
+    });
+    return this.data.users[idx];
+  }
+
+  // --- Auth Tokens (Email Verification & Password Reset) ---
+  public createAuthToken(token: AuthToken): AuthToken {
+    this.data.authTokens.push(token);
+    if (this.data.authTokens.length > 2000) {
+      const now = Date.now();
+      this.data.authTokens = this.data.authTokens.filter(t => !t.usedAt && t.expiresAt > now);
+    }
+    this.save();
+    this.enqueuePrismaSync(async (prisma) => {
+      await prisma.createAuthToken(token);
+    });
+    return token;
+  }
+
+  public invalidateAuthTokens(userId: string, type: AuthTokenType): void {
+    const now = Date.now();
+    let changed = false;
+    for (const token of this.data.authTokens) {
+      if (token.userId === userId && token.type === type && !token.usedAt) {
+        token.usedAt = now;
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.save();
+      this.enqueuePrismaSync(async (prisma) => {
+        await prisma.invalidateAuthTokens(userId, type);
+      });
+    }
+  }
+
+  public findAuthTokenByRawToken(rawToken: string, type: AuthTokenType): AuthToken | undefined {
+    const tokenHash = this.hashToken(rawToken.trim());
+    const now = Date.now();
+    return this.data.authTokens.find(
+      t => t.type === type && t.tokenHash === tokenHash && !t.usedAt && t.expiresAt > now
+    );
+  }
+
+  public findAuthTokenByOtp(email: string, otpCode: string, type: AuthTokenType): AuthToken | undefined {
+    const cleanEmail = email.trim().toLowerCase();
+    const otpCodeHash = this.hashToken(otpCode.trim());
+    const now = Date.now();
+    return this.data.authTokens.find(
+      t =>
+        t.type === type &&
+        t.email.toLowerCase() === cleanEmail &&
+        t.otpCodeHash === otpCodeHash &&
+        !t.usedAt &&
+        t.expiresAt > now
+    );
+  }
+
+  public getLatestAuthToken(userId: string, type: AuthTokenType): AuthToken | undefined {
+    return this.data.authTokens
+      .filter(t => t.userId === userId && t.type === type)
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+  }
+
+  public countRecentAuthTokens(userId: string, type: AuthTokenType, windowMs: number): number {
+    const cutoff = Date.now() - windowMs;
+    return this.data.authTokens.filter(t => t.userId === userId && t.type === type && t.createdAt >= cutoff).length;
+  }
+
+  public markAuthTokenUsed(id: string): void {
+    const token = this.data.authTokens.find(t => t.id === id);
+    if (token && !token.usedAt) {
+      token.usedAt = Date.now();
+      this.save();
+      this.enqueuePrismaSync(async (prisma) => {
+        await prisma.markAuthTokenUsed(id);
+      });
+    }
   }
 
   // --- Products ---

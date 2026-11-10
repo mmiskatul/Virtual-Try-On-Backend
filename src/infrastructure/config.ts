@@ -50,5 +50,20 @@ export const config = {
   falKey: process.env.FAL_KEY || process.env.FAL_API_KEY || '',
   vtonApiKey: process.env.VTON_API_KEY || process.env.FAL_KEY || process.env.FASHN_API_KEY || process.env.REPLICATE_API_TOKEN || '',
   vtonApiUrl: process.env.VTON_API_URL || '',
-  vtonProvider: process.env.VTON_PROVIDER || 'gemini'
+  vtonProvider: process.env.VTON_PROVIDER || 'gemini',
+
+  // Frontend Portal Origins (used for verification & password reset links)
+  marketplaceUrl: process.env.MARKETPLACE_URL || 'http://localhost:3000',
+  brandDashboardUrl: process.env.BRAND_DASHBOARD_URL || 'http://localhost:3001',
+  superAdminUrl: process.env.SUPER_ADMIN_URL || 'http://localhost:3002',
+
+  // Email Delivery (Resend or SMTP; falls back to dev console/preview when unset in non-production)
+  resendApiKey: process.env.RESEND_API_KEY || '',
+  smtpHost: process.env.SMTP_HOST || '',
+  smtpPort: Number(process.env.SMTP_PORT || 587),
+  smtpSecure: process.env.SMTP_SECURE === 'true',
+  smtpUser: process.env.SMTP_USER || '',
+  smtpPass: process.env.SMTP_PASS || '',
+  emailFrom: process.env.EMAIL_FROM || 'V-TRY Studio <noreply@v-try.fashion>',
+  devEmailPreview: process.env.DEV_EMAIL_PREVIEW !== 'false'
 };
