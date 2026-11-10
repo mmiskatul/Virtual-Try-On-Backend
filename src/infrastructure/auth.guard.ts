@@ -35,8 +35,11 @@ export async function authenticateToken(request: FastifyRequest, reply: FastifyR
       if (!tenant) {
         return reply.status(403).send({ error: 'Forbidden', message: 'Tenant organization not found.' });
       }
-      if (tenant.status === 'SUSPENDED') {
-        return reply.status(403).send({ error: 'TenantSuspended', message: 'Tenant organization is currently suspended.' });
+      if (tenant.status !== 'ACTIVE') {
+        return reply.status(403).send({
+          error: 'TenantSuspended',
+          message: 'Tenant organization is not active.'
+        });
       }
       request.tenant = tenant;
     }

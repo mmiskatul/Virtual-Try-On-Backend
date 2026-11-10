@@ -10,6 +10,7 @@
     "start": "tsx src/index.ts",
     "test": "tsx test/backend.test.ts",
     "test:auth": "tsx test/auth.test.ts",
+    "test:security": "tsx test/security.test.ts",
     "test:prisma": "tsx test/prisma.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",

@@ -39,6 +39,8 @@ export class Database {
   private prismaDb: PrismaDatabase | null = null;
   private transactionLock: Promise<void> = Promise.resolve();
   private prismaSyncQueue: Promise<void> = Promise.resolve();
+  private skipAsyncHydration: boolean = false;
+  private otpFailedAttempts = new Map<string, { count: number; resetAt: number }>();
 
   constructor(customSnapshotPath?: string) {
     this.snapshotPath = customSnapshotPath || path.resolve(process.cwd(), '.data', 'db_snapshot.json');
@@ -49,16 +51,137 @@ export class Database {
     }
   }
 
+  public getDatabaseProviderLabel(): string {
+    const url = (config.databaseUrl || '').toLowerCase();
+    if (!url) return 'In-Memory + Local Snapshot';
+    if (url.includes('supabase.co') || url.includes('supabase.com') || url.includes('pooler.supabase.com')) {
+      return 'Supabase PostgreSQL';
+    }
+    if (url.includes('neon.tech')) {
+      return 'Neon PostgreSQL';
+    }
+    return 'PostgreSQL';
+  }
+
   private async initPrisma(url: string): Promise<void> {
     try {
       this.prismaDb = new PrismaDatabase(url);
       const connected = await this.prismaDb.init();
       if (connected) {
-        console.log('[Database] Active persistence: Prisma ORM with PostgreSQL.');
+        console.log(`[Database] Active persistence: Prisma ORM (${this.getDatabaseProviderLabel()}).`);
+        if (!this.skipAsyncHydration) {
+          await this.hydrateOrSeedDatabase();
+        }
       }
     } catch (err: any) {
       console.warn('[Database] Prisma ORM init failed, running on resilient memory snapshot:', err.message);
     }
+  }
+
+  private async hydrateOrSeedDatabase(): Promise<void> {
+    if (!this.prismaDb || !this.prismaDb.isConnected()) return;
+    try {
+      const hydrated = await this.prismaDb.hydrateAll();
+      if (!hydrated) return;
+
+      // If remote DB has tenants AND users, hydrate memory from it; otherwise sync initial seed data
+      if (hydrated.tenants.length > 0 && hydrated.users.length > 0) {
+        this.data = {
+          tenants: hydrated.tenants,
+          users: hydrated.users,
+          authTokens: hydrated.authTokens,
+          products: hydrated.products.length > 0 ? hydrated.products : this.data.products,
+          fabrics: hydrated.fabrics.length > 0 ? hydrated.fabrics : this.data.fabrics,
+          subscriptions: hydrated.subscriptions.length > 0 ? hydrated.subscriptions : this.data.subscriptions,
+          orders: hydrated.orders,
+          inventoryLogs: hydrated.inventoryLogs,
+          auditLogs: hydrated.auditLogs,
+        };
+        this.save();
+        console.log(
+          `[Database] Hydrated ${hydrated.tenants.length} tenants, ${hydrated.users.length} users, ${hydrated.products.length} products from ${this.getDatabaseProviderLabel()}.`
+        );
+      } else {
+        await this.prismaDb.syncCollections(this.data);
+        if (hydrated.tenants.length > 0) {
+          // Existing DB had tenants/orders created prior to user seeding; re-hydrate merged records
+          const rehydrated = await this.prismaDb.hydrateAll();
+          if (rehydrated) {
+            this.data.tenants = rehydrated.tenants;
+            this.data.orders = rehydrated.orders;
+            this.save();
+          }
+        }
+        console.log(`[Database] Synchronized initial seed data into ${this.getDatabaseProviderLabel()}.`);
+      }
+    } catch (err: any) {
+      console.warn('[Database] Hydration warning:', err?.message || err);
+    }
+  }
+
+  public async reloadDatabase(newDatabaseUrl: string): Promise<{
+    connected: boolean;
+    provider: string;
+    latencyMs?: number;
+    counts?: Record<string, number> | null;
+    error?: string;
+  }> {
+    this.skipAsyncHydration = false;
+    if (this.prismaDb) {
+      await this.prismaDb.close().catch(() => {});
+      this.prismaDb = null;
+    }
+    if (this.neonSql) {
+      await this.neonSql.close().catch(() => {});
+      this.neonSql = null;
+    }
+
+    if (!newDatabaseUrl) {
+      return { connected: false, provider: 'In-Memory + Local Snapshot' };
+    }
+
+    // Ensure SQL tables and columns exist first
+    this.neonSql = new NeonSqlDatabase(newDatabaseUrl);
+    const sqlOk = await this.neonSql.init();
+
+    this.prismaDb = new PrismaDatabase(newDatabaseUrl);
+    const prismaOk = await this.prismaDb.init();
+
+    if (!sqlOk && !prismaOk) {
+      return {
+        connected: false,
+        provider: this.getDatabaseProviderLabel(),
+        error: 'Failed to connect to the database URL provided. Check credentials, host, and SSL settings.',
+      };
+    }
+
+    if (prismaOk) {
+      await this.hydrateOrSeedDatabase();
+      const health = await this.prismaDb.checkHealth();
+      const counts = await this.prismaDb.getTableCounts();
+      return {
+        connected: health.ok,
+        provider: this.getDatabaseProviderLabel(),
+        latencyMs: health.latencyMs,
+        counts,
+        error: health.error,
+      };
+    }
+
+    const sqlHealth = await this.neonSql.checkHealth();
+    return {
+      connected: sqlHealth.ok,
+      provider: this.getDatabaseProviderLabel(),
+      latencyMs: sqlHealth.latencyMs,
+      error: sqlHealth.error,
+    };
+  }
+
+  public async syncSnapshotToDatabase(): Promise<{ synced: Record<string, number> }> {
+    if (!this.prismaDb || !this.prismaDb.isConnected()) {
+      throw new Error('PostgreSQL / Supabase connection is not active.');
+    }
+    return this.prismaDb.syncCollections(this.data);
   }
 
   public isPrismaActive(): boolean {
@@ -145,6 +268,8 @@ export class Database {
   }
 
   public reset() {
+    this.skipAsyncHydration = true;
+    this.otpFailedAttempts.clear();
     this.seedDemoData();
     this.save();
   }
@@ -184,6 +309,7 @@ export class Database {
   }
 
   private enqueuePrismaSync(task: (prisma: PrismaDatabase) => Promise<void>): void {
+    if (this.skipAsyncHydration) return;
     this.prismaSyncQueue = this.prismaSyncQueue
       .then(async () => {
         if (this.prismaDb && this.prismaDb.isConnected()) {
@@ -551,6 +677,11 @@ export class Database {
       updatedAt: Date.now()
     };
     this.save();
+    if (!this.skipAsyncHydration) {
+      this.enqueuePrismaSync(async (prisma) => {
+        await prisma.updateTenant(id, updates);
+      });
+    }
     return this.data.tenants[idx];
   }
 
@@ -672,6 +803,38 @@ export class Database {
     }
   }
 
+  public recordOtpFailure(email: string, type: AuthTokenType): { locked: boolean; attempts: number } {
+    const key = `${email.trim().toLowerCase()}:${type}`;
+    const now = Date.now();
+    const existing = this.otpFailedAttempts.get(key);
+    if (!existing || existing.resetAt <= now) {
+      this.otpFailedAttempts.set(key, { count: 1, resetAt: now + 15 * 60_000 });
+      return { locked: false, attempts: 1 };
+    }
+    existing.count += 1;
+    if (existing.count >= 5) {
+      const user = this.getUserByEmail(email);
+      if (user) this.invalidateAuthTokens(user.id, type);
+      return { locked: true, attempts: existing.count };
+    }
+    return { locked: false, attempts: existing.count };
+  }
+
+  public clearOtpFailures(email: string, type: AuthTokenType): void {
+    this.otpFailedAttempts.delete(`${email.trim().toLowerCase()}:${type}`);
+  }
+
+  public isOtpLocked(email: string, type: AuthTokenType): boolean {
+    const key = `${email.trim().toLowerCase()}:${type}`;
+    const entry = this.otpFailedAttempts.get(key);
+    if (!entry) return false;
+    if (entry.resetAt <= Date.now()) {
+      this.otpFailedAttempts.delete(key);
+      return false;
+    }
+    return entry.count >= 5;
+  }
+
   // --- Products ---
   public getProducts(): Product[] {
     return this.data.products;
@@ -688,6 +851,11 @@ export class Database {
   public createProduct(product: Product): Product {
     this.data.products.push(product);
     this.save();
+    if (!this.skipAsyncHydration) {
+      this.enqueuePrismaSync(async (prisma) => {
+        await prisma.createProduct(product);
+      });
+    }
     return product;
   }
 
@@ -700,6 +868,11 @@ export class Database {
       updatedAt: Date.now()
     };
     this.save();
+    if (!this.skipAsyncHydration) {
+      this.enqueuePrismaSync(async (prisma) => {
+        await prisma.updateProduct(id, tenantId, updates);
+      });
+    }
     return this.data.products[idx];
   }
 
@@ -707,7 +880,14 @@ export class Database {
     const initialLen = this.data.products.length;
     this.data.products = this.data.products.filter(p => !(p.id === id && p.tenantId === tenantId));
     const deleted = this.data.products.length < initialLen;
-    if (deleted) this.save();
+    if (deleted) {
+      this.save();
+      if (!this.skipAsyncHydration) {
+        this.enqueuePrismaSync(async (prisma) => {
+          await prisma.deleteProduct(id, tenantId);
+        });
+      }
+    }
     return deleted;
   }
 
@@ -741,6 +921,11 @@ export class Database {
   public createFabric(fabric: Fabric): Fabric {
     this.data.fabrics.push(fabric);
     this.save();
+    if (!this.skipAsyncHydration) {
+      this.enqueuePrismaSync(async (prisma) => {
+        await prisma.createFabric(fabric);
+      });
+    }
     return fabric;
   }
 
@@ -749,6 +934,11 @@ export class Database {
     if (idx === -1) return undefined;
     this.data.fabrics[idx] = { ...this.data.fabrics[idx], ...updates };
     this.save();
+    if (!this.skipAsyncHydration) {
+      this.enqueuePrismaSync(async (prisma) => {
+        await prisma.updateFabric(id, tenantId, updates);
+      });
+    }
     return this.data.fabrics[idx];
   }
 
@@ -756,7 +946,14 @@ export class Database {
     const initialLen = this.data.fabrics.length;
     this.data.fabrics = this.data.fabrics.filter(f => !(f.id === id && f.tenantId === tenantId));
     const deleted = this.data.fabrics.length < initialLen;
-    if (deleted) this.save();
+    if (deleted) {
+      this.save();
+      if (!this.skipAsyncHydration) {
+        this.enqueuePrismaSync(async (prisma) => {
+          await prisma.deleteFabric(id, tenantId);
+        });
+      }
+    }
     return deleted;
   }
 
@@ -798,6 +995,19 @@ export class Database {
     };
     this.data.inventoryLogs.push(log);
     this.save();
+    if (!this.skipAsyncHydration) {
+      this.enqueuePrismaSync(async (prisma) => {
+        await prisma.updateProduct(productId, tenantId, { variants: product.variants });
+        await prisma.recordInventoryLog({
+          tenantId,
+          productId,
+          variantSku,
+          change,
+          newStock: nextStock,
+          reason
+        });
+      });
+    }
 
     return { success: true, newStock: nextStock };
   }
@@ -824,6 +1034,11 @@ export class Database {
   public createOrder(order: Order): Order {
     this.data.orders.push(order);
     this.save();
+    if (!this.skipAsyncHydration) {
+      this.enqueuePrismaSync(async (prisma) => {
+        await prisma.createOrder(order);
+      });
+    }
     return order;
   }
 
@@ -833,6 +1048,11 @@ export class Database {
     order.status = status;
     order.updatedAt = Date.now();
     this.save();
+    if (!this.skipAsyncHydration) {
+      this.enqueuePrismaSync(async (prisma) => {
+        await prisma.updateOrderStatus(id, tenantId, status);
+      });
+    }
     return order;
   }
 
@@ -847,6 +1067,11 @@ export class Database {
       sub.tryOnUsed += 1;
       sub.updatedAt = Date.now();
       this.save();
+      if (!this.skipAsyncHydration) {
+        this.enqueuePrismaSync(async (prisma) => {
+          await prisma.recordTryOnUsage(tenantId);
+        });
+      }
     }
   }
 
@@ -854,7 +1079,7 @@ export class Database {
   public recordAuditLog(log: Omit<AuditLog, 'id' | 'timestamp'>): AuditLog {
     const record: AuditLog = {
       ...log,
-      id: `audit_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: `audit_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
       timestamp: Date.now()
     };
     this.data.auditLogs.unshift(record);
@@ -862,6 +1087,11 @@ export class Database {
       this.data.auditLogs.pop();
     }
     this.save();
+    if (!this.skipAsyncHydration) {
+      this.enqueuePrismaSync(async (prisma) => {
+        await prisma.recordAuditLog(log);
+      });
+    }
     return record;
   }
 

@@ -57,11 +57,37 @@ function getPortalMeta(portal: AuthPortal): { title: string; accent: string; bas
   }
 }
 
+export interface SmtpOverrideOptions {
+  host?: string;
+  port?: number;
+  secure?: boolean;
+  user?: string;
+  pass?: string;
+  from?: string;
+}
+
 class EmailService {
   private smtpTransporter: Transporter | null = null;
 
   public hasRealTransport(): boolean {
     return Boolean(config.resendApiKey || config.smtpHost);
+  }
+
+  public getActiveTransport(): 'smtp' | 'resend' | 'dev-preview' {
+    if (config.smtpHost) return 'smtp';
+    if (config.resendApiKey) return 'resend';
+    return 'dev-preview';
+  }
+
+  public reloadTransport(): void {
+    if (this.smtpTransporter) {
+      try {
+        this.smtpTransporter.close();
+      } catch {
+        // Ignore transporter close errors
+      }
+      this.smtpTransporter = null;
+    }
   }
 
   public isDevPreviewAllowed(): boolean {
@@ -72,26 +98,157 @@ class EmailService {
     return getPortalMeta(portal).baseUrl;
   }
 
+  private createSmtpTransporter(override?: SmtpOverrideOptions): Transporter | null {
+    const host = (override?.host ?? config.smtpHost).trim();
+    if (!host) return null;
+
+    const port = Number(override?.port ?? config.smtpPort ?? 587);
+    const secure = override?.secure !== undefined ? Boolean(override.secure) : port === 465 || config.smtpSecure;
+    const user = (override?.user ?? config.smtpUser).trim();
+    const pass = override?.pass !== undefined && override.pass !== '' ? override.pass : config.smtpPass;
+
+    return nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      connectionTimeout: 10000,
+      greetingTimeout: 10000,
+      socketTimeout: 15000,
+      auth: user
+        ? {
+            user,
+            pass,
+          }
+        : undefined,
+    });
+  }
+
   private getSmtpTransporter(): Transporter | null {
     if (!config.smtpHost) return null;
     if (!this.smtpTransporter) {
-      this.smtpTransporter = nodemailer.createTransport({
-        host: config.smtpHost,
-        port: config.smtpPort,
-        secure: config.smtpSecure,
-        auth: config.smtpUser
-          ? {
-              user: config.smtpUser,
-              pass: config.smtpPass,
-            }
-          : undefined,
-      });
+      this.smtpTransporter = this.createSmtpTransporter();
     }
     return this.smtpTransporter;
   }
 
+  public async verifySmtpConnection(override?: SmtpOverrideOptions): Promise<{
+    success: boolean;
+    message: string;
+    latencyMs: number;
+  }> {
+    const transporter = override?.host ? this.createSmtpTransporter(override) : this.getSmtpTransporter();
+    if (!transporter) {
+      return {
+        success: false,
+        latencyMs: 0,
+        message: 'SMTP host is not configured.',
+      };
+    }
+
+    const start = performance.now();
+    try {
+      await transporter.verify();
+      const latencyMs = Number((performance.now() - start).toFixed(1));
+      if (override?.host) transporter.close();
+      return {
+        success: true,
+        latencyMs,
+        message: `SMTP connection verified successfully (${latencyMs}ms). Ready to deliver verification and reset emails.`,
+      };
+    } catch (err: any) {
+      const latencyMs = Number((performance.now() - start).toFixed(1));
+      if (override?.host) transporter.close();
+      return {
+        success: false,
+        latencyMs,
+        message: `SMTP handshake failed: ${err?.message || 'Connection error'}`,
+      };
+    }
+  }
+
+  public async sendTestEmail(to: string, override?: SmtpOverrideOptions): Promise<{
+    success: boolean;
+    provider: 'smtp' | 'resend' | 'dev-preview';
+    messageId?: string;
+    message: string;
+  }> {
+    const transporter = override?.host ? this.createSmtpTransporter(override) : this.getSmtpTransporter();
+    const fromAddr = (override?.from ?? config.emailFrom).trim() || 'V-TRY Studio <noreply@v-try.fashion>';
+
+    if (transporter) {
+      try {
+        const info = await transporter.sendMail({
+          from: fromAddr,
+          to,
+          subject: 'V-TRY Platform — SMTP Email Delivery Test',
+          html: `
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; background: #0f172a; color: #e2e8f0; border-radius: 16px; padding: 28px; border: 1px solid #1e293b;">
+              <div style="font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #f59e0b; font-weight: 700; margin-bottom: 10px;">V-TRY Platform Infrastructure</div>
+              <h2 style="color: #ffffff; margin: 0 0 10px;">SMTP Test Successful</h2>
+              <p style="font-size: 13px; color: #94a3b8; line-height: 1.6; margin: 0;">
+                Your SMTP mail transport is configured and working properly for account verification and password recovery emails.
+              </p>
+            </div>
+          `,
+          text: 'V-TRY Platform SMTP Test Successful — Your email delivery pipeline is working properly.',
+        });
+        if (override?.host) transporter.close();
+        return {
+          success: true,
+          provider: 'smtp',
+          messageId: info.messageId,
+          message: `Test email sent via SMTP to ${to} (Message ID: ${info.messageId}).`,
+        };
+      } catch (err: any) {
+        if (override?.host) transporter.close();
+        return {
+          success: false,
+          provider: 'smtp',
+          message: `Failed to send test email via SMTP: ${err?.message || 'Unknown error'}`,
+        };
+      }
+    }
+
+    if (config.resendApiKey) {
+      const res = await this.dispatch({
+        to,
+        subject: 'V-TRY Platform — Resend Email Delivery Test',
+        html: '<p>Your Resend email delivery pipeline is working properly.</p>',
+        text: 'Your Resend email delivery pipeline is working properly.',
+      });
+      return {
+        success: res.delivered,
+        provider: res.provider,
+        message: `Test email dispatched via ${res.provider} to ${to}.`,
+      };
+    }
+
+    return {
+      success: false,
+      provider: 'dev-preview',
+      message: 'No SMTP host or Resend API key configured. Enter SMTP details to test live email delivery.',
+    };
+  }
+
   private async dispatch(payload: BaseMailPayload): Promise<EmailSendResult> {
-    // 1. Resend HTTP API
+    // 1. Nodemailer SMTP (preferred when SMTP_HOST is configured)
+    const transporter = this.getSmtpTransporter();
+    if (transporter) {
+      try {
+        await transporter.sendMail({
+          from: config.emailFrom,
+          to: payload.to,
+          subject: payload.subject,
+          html: payload.html,
+          text: payload.text,
+        });
+        return { delivered: true, provider: 'smtp' };
+      } catch (err: any) {
+        console.warn('[EmailService] SMTP dispatch error:', err?.message || err);
+      }
+    }
+
+    // 2. Resend HTTP API
     if (config.resendApiKey) {
       try {
         const res = await fetch('https://api.resend.com/emails', {
@@ -115,23 +272,6 @@ class EmailService {
         console.warn(`[EmailService] Resend API returned ${res.status}: ${errText}`);
       } catch (err: any) {
         console.warn('[EmailService] Resend dispatch error:', err?.message || err);
-      }
-    }
-
-    // 2. Nodemailer SMTP
-    const transporter = this.getSmtpTransporter();
-    if (transporter) {
-      try {
-        await transporter.sendMail({
-          from: config.emailFrom,
-          to: payload.to,
-          subject: payload.subject,
-          html: payload.html,
-          text: payload.text,
-        });
-        return { delivered: true, provider: 'smtp' };
-      } catch (err: any) {
-        console.warn('[EmailService] SMTP dispatch error:', err?.message || err);
       }
     }
 

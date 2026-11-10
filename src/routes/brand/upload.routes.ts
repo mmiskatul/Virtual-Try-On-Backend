@@ -1,7 +1,19 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
 import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
 import { config } from '../../infrastructure/config.js';
+
+const brandGuards = [authenticateToken, requireRole('BRAND_OWNER', 'STORE_MANAGER')];
+
+function sanitizeFolderPath(folder: unknown, tenantId: string): string {
+  const defaultFolder = `${config.cloudinaryFolder}/${tenantId}`;
+  if (typeof folder !== 'string' || !folder.trim()) return defaultFolder;
+  const cleaned = folder.trim().replace(/\.\./g, '').replace(/[^a-zA-Z0-9/_-]/g, '');
+  if (!cleaned || !cleaned.startsWith(config.cloudinaryFolder)) {
+    return defaultFolder;
+  }
+  return cleaned;
+}
 
 export async function brandUploadRoutes(app: FastifyInstance) {
   // Check Cloudinary storage integration status
@@ -17,9 +29,10 @@ export async function brandUploadRoutes(app: FastifyInstance) {
   });
 
   // Upload an image (supports multipart file or JSON base64 payload)
-  app.post('/api/v1/uploads', { preHandler: [authenticateToken] }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/uploads', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const isMultipart = typeof request.isMultipart === 'function' ? request.isMultipart() : false;
-    const tenantId = request.tenant?.id || 'public';
+    const tenantId = request.tenant.id;
 
     if (isMultipart) {
       const data = await request.file();
@@ -73,7 +86,7 @@ export async function brandUploadRoutes(app: FastifyInstance) {
     const publicId = `brand_${tenantId}_${Date.now()}`;
     const cloudinaryUrl = await cloudinaryStorage.uploadBase64(imageBase64, {
       publicId,
-      folder: folder || `${config.cloudinaryFolder}/${tenantId}`,
+      folder: sanitizeFolderPath(folder, tenantId),
       tags: ['vton', tenantId]
     });
 

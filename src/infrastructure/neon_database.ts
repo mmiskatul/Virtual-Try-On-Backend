@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { POSTGRES_SCHEMA_SQL } from './sql_schema.js';
+import { requiresSslConnection } from './prisma.js';
 import { Tenant, User, Product, Fabric, InventoryLog, Subscription, Order, AuditLog } from '../domain/types.js';
 
 const { Pool } = pg;
@@ -15,13 +16,13 @@ export class NeonSqlDatabase {
 
   public async init(): Promise<boolean> {
     try {
-      const isSsl = this.databaseUrl.includes('sslmode=require') || this.databaseUrl.includes('neon.tech');
+      const isSsl = requiresSslConnection(this.databaseUrl);
       this.pool = new Pool({
         connectionString: this.databaseUrl,
         ssl: isSsl ? { rejectUnauthorized: false } : undefined,
         max: 10,
         idleTimeoutMillis: 30000,
-        connectionTimeoutMillis: 5000,
+        connectionTimeoutMillis: 8000,
       });
 
       const client = await this.pool.connect();
@@ -53,7 +54,7 @@ export class NeonSqlDatabase {
 
   public async checkHealth(): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
     if (!this.pool || !this.connected) {
-      return { ok: false, latencyMs: 0, error: 'Neon SQL connection not active' };
+      return { ok: false, latencyMs: 0, error: 'SQL connection not active' };
     }
     const start = performance.now();
     try {
@@ -62,6 +63,14 @@ export class NeonSqlDatabase {
     } catch (err: any) {
       return { ok: false, latencyMs: Number((performance.now() - start).toFixed(1)), error: err.message };
     }
+  }
+
+  public async close(): Promise<void> {
+    if (this.pool) {
+      await this.pool.end().catch(() => {});
+      this.pool = null;
+    }
+    this.connected = false;
   }
 
   // --- Tenants ---

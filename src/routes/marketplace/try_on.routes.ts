@@ -6,6 +6,37 @@ import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
 
 // Cache for try-on results uploaded to Cloudinary
 const cloudinaryTryOnCache = new Map<string, string>();
+const SAFE_JOB_ID_REGEX = /^[a-zA-Z0-9_-]{3,80}$/;
+
+function isSafeRemoteImageUrl(rawUrl: string): boolean {
+  if (rawUrl.startsWith('/')) return true;
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+
+    const aiOrigin = new URL(config.aiServiceUrl).origin;
+    if (parsed.origin === aiOrigin) return true;
+
+    // Require HTTPS for external remote URLs and block loopback/metadata/private IPv4 ranges
+    if (parsed.protocol !== 'https:') return false;
+    const host = parsed.hostname.toLowerCase();
+    if (
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '::1' ||
+      host === '0.0.0.0' ||
+      host.startsWith('10.') ||
+      host.startsWith('192.168.') ||
+      host.startsWith('169.254.') ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(host)
+    ) {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export async function marketplaceTryOnRoutes(app: FastifyInstance) {
   // Query Active VTON Engine / API Provider Status
@@ -199,10 +230,17 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
     const body = (request.body as any) || {};
     const { imageBase64, filename } = body;
 
-    if (!imageBase64) {
+    if (!imageBase64 || typeof imageBase64 !== 'string') {
       return reply.status(400).send({
         error: 'ValidationError',
         message: 'Multipart image file or imageBase64 string required.'
+      });
+    }
+
+    if (imageBase64.length > 14 * 1024 * 1024) {
+      return reply.status(413).send({
+        error: 'PayloadTooLarge',
+        message: 'Base64 image exceeds 10MB limit.'
       });
     }
 
@@ -233,6 +271,12 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
   // Check Job Status
   app.get('/api/v1/try-on/status/:jobId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { jobId } = request.params as { jobId: string };
+    if (!jobId || !SAFE_JOB_ID_REGEX.test(jobId)) {
+      return reply.status(400).send({
+        error: 'ValidationError',
+        message: 'Invalid try-on jobId format.'
+      });
+    }
 
     // Check external VTON service cache first
     const externalStatus = await externalVtonService.getStatus(jobId);
@@ -289,7 +333,7 @@ async function uploadTryOnResultToCloudinary(jobId: string, rawResultUrl: string
     return rawResultUrl;
   }
 
-  if (!cloudinaryStorage.isConfigured()) {
+  if (!cloudinaryStorage.isConfigured() || !isSafeRemoteImageUrl(rawResultUrl)) {
     return null;
   }
 

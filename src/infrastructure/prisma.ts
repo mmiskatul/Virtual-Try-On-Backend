@@ -12,17 +12,31 @@ export interface PrismaClientOptions {
 let activePrisma: PrismaClient | null = null;
 let activePool: pg.Pool | null = null;
 
+export function requiresSslConnection(connectionString: string): boolean {
+  const lower = connectionString.toLowerCase();
+  if (lower.includes('sslmode=disable')) return false;
+  if (lower.includes('sslmode=require') || lower.includes('sslmode=verify-ca') || lower.includes('sslmode=verify-full')) {
+    return true;
+  }
+  return (
+    lower.includes('supabase.co') ||
+    lower.includes('supabase.com') ||
+    lower.includes('pooler.supabase.com') ||
+    lower.includes('neon.tech')
+  );
+}
+
 export function createPrismaInstance(options: PrismaClientOptions = {}): { prisma: PrismaClient; pool: pg.Pool } {
   let pool = options.pool;
 
   if (!pool && options.connectionString) {
-    const isSsl = options.connectionString.includes('sslmode=require') || options.connectionString.includes('neon.tech');
+    const isSsl = requiresSslConnection(options.connectionString);
     pool = new Pool({
       connectionString: options.connectionString,
       ssl: isSsl ? { rejectUnauthorized: false } : undefined,
       max: 10,
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000,
+      connectionTimeoutMillis: 8000,
     });
   }
 

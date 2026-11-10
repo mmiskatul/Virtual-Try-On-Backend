@@ -133,8 +133,24 @@ export function registerSharedAuthRoutes(
       });
     }
 
+    if (!tokenStr && emailStr && db.isOtpLocked(emailStr, 'EMAIL_VERIFICATION')) {
+      return reply.status(429).send({
+        error: 'TooManyAttempts',
+        message: 'Too many invalid verification attempts. Please request a new verification email.',
+      });
+    }
+
     const tokenRecord = findMatchingToken({ token: tokenStr, email: emailStr, code: codeStr }, 'EMAIL_VERIFICATION');
     if (!tokenRecord) {
+      if (!tokenStr && emailStr) {
+        const { locked } = db.recordOtpFailure(emailStr, 'EMAIL_VERIFICATION');
+        if (locked) {
+          return reply.status(429).send({
+            error: 'TooManyAttempts',
+            message: 'Too many invalid verification codes. Your active code has been invalidated; please request a new one.',
+          });
+        }
+      }
       return reply.status(400).send({
         error: 'InvalidOrExpiredToken',
         code: 'INVALID_VERIFICATION_TOKEN',
@@ -149,6 +165,8 @@ export function registerSharedAuthRoutes(
         message: 'Associated user account could not be found.',
       });
     }
+
+    db.clearOtpFailures(user.email, 'EMAIL_VERIFICATION');
 
     const updatedUser = db.updateUser(user.id, {
       emailVerified: true,
@@ -319,8 +337,24 @@ export function registerSharedAuthRoutes(
       });
     }
 
+    if (!tokenStr && emailStr && db.isOtpLocked(emailStr, 'PASSWORD_RESET')) {
+      return reply.status(429).send({
+        error: 'TooManyAttempts',
+        message: 'Too many invalid reset attempts. Please request a new reset code.',
+      });
+    }
+
     const tokenRecord = findMatchingToken({ token: tokenStr, email: emailStr, code: codeStr }, 'PASSWORD_RESET');
     if (!tokenRecord) {
+      if (!tokenStr && emailStr) {
+        const { locked } = db.recordOtpFailure(emailStr, 'PASSWORD_RESET');
+        if (locked) {
+          return reply.status(429).send({
+            error: 'TooManyAttempts',
+            message: 'Too many invalid reset codes. Active codes were invalidated; please request a new reset email.',
+          });
+        }
+      }
       return reply.status(400).send({
         error: 'InvalidOrExpiredToken',
         code: 'INVALID_RESET_TOKEN',
@@ -335,6 +369,8 @@ export function registerSharedAuthRoutes(
         message: 'Associated user account could not be found.',
       });
     }
+
+    db.clearOtpFailures(user.email, 'PASSWORD_RESET');
 
     const nextHash = db.hashPassword(newPassword);
     db.updateUser(user.id, {

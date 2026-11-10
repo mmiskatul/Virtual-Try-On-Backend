@@ -8,103 +8,158 @@ interface CheckoutItemInput {
   quantity: number;
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function validateCartItems(items: any[]): {
+  ok: true;
+  tenantId: string;
+  brandName: string;
+  subtotal: number;
+  shippingFee: number;
+  total: number;
+  resolvedItems: OrderItem[];
+} | { ok: false; status: number; error: string; message: string } {
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return { ok: false, status: 400, error: 'ValidationError', message: 'Cart cannot be empty.' };
+  }
+  if (items.length > 50) {
+    return { ok: false, status: 400, error: 'ValidationError', message: 'Cart exceeds maximum 50 line items.' };
+  }
+
+  const tenantIds = new Set<string>();
+  let subtotal = 0;
+  const resolvedItems: OrderItem[] = [];
+
+  for (const item of items) {
+    if (
+      !item ||
+      typeof item.productId !== 'string' ||
+      typeof item.variantSku !== 'string' ||
+      typeof item.quantity !== 'number' ||
+      !Number.isInteger(item.quantity) ||
+      item.quantity <= 0 ||
+      item.quantity > 100
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'ValidationError',
+        message: 'Each item must have a valid productId, variantSku, and positive integer quantity (1-100).',
+      };
+    }
+
+    const product = db.getProductById(item.productId);
+    if (!product) {
+      return {
+        ok: false,
+        status: 404,
+        error: 'NotFound',
+        message: `Product '${item.productId}' not found.`,
+      };
+    }
+
+    if (!product.marketplacePublished && !product.brandStorefrontPublished) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'ProductUnavailable',
+        message: `Product '${product.name}' is not currently published for sale.`,
+      };
+    }
+
+    tenantIds.add(product.tenantId);
+
+    if (tenantIds.size > 1) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'MultiSellerError',
+        message:
+          'Your cart contains items from multiple brands. Virtual Try-On orders must be fulfilled by a single brand seller per order.',
+      };
+    }
+
+    const variant = product.variants.find((v) => v.sku === item.variantSku);
+    if (!variant) {
+      return {
+        ok: false,
+        status: 404,
+        error: 'VariantNotFound',
+        message: `Variant '${item.variantSku}' not found on product '${product.name}'.`,
+      };
+    }
+
+    if (variant.stockQuantity < item.quantity) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'InsufficientStock',
+        message: `Insufficient stock for '${product.name}' (${variant.size}/${variant.color}). Requested: ${item.quantity}, available: ${variant.stockQuantity}`,
+      };
+    }
+
+    const lineTotal = Number((product.price * item.quantity).toFixed(2));
+    subtotal = Number((subtotal + lineTotal).toFixed(2));
+    resolvedItems.push({
+      productId: product.id,
+      variantSku: variant.sku,
+      productName: product.name,
+      size: variant.size,
+      color: variant.color,
+      quantity: item.quantity,
+      unitPrice: product.price,
+      lineTotal,
+      imageUrl: product.images[0],
+    });
+  }
+
+  const singleTenantId = Array.from(tenantIds)[0];
+  const tenant = db.getTenantById(singleTenantId);
+  if (!tenant || tenant.status !== 'ACTIVE') {
+    return {
+      ok: false,
+      status: 403,
+      error: 'SellerInactive',
+      message: 'The seller for these products is currently inactive.',
+    };
+  }
+
+  const shippingFee = subtotal >= 150 ? 0 : 15.0;
+  const total = Number((subtotal + shippingFee).toFixed(2));
+
+  return {
+    ok: true,
+    tenantId: singleTenantId,
+    brandName: tenant.name,
+    subtotal,
+    shippingFee,
+    total,
+    resolvedItems,
+  };
+}
+
 export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
   // Validate Checkout Basket (Enforces Single-Seller Policy)
   app.post('/api/v1/checkout/validate', async (request: FastifyRequest, reply: FastifyReply) => {
     const { items } = (request.body as { items: CheckoutItemInput[] }) || {};
+    const validation = validateCartItems(items);
 
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return reply.status(400).send({
+    if (!validation.ok) {
+      return reply.status(validation.status).send({
         valid: false,
-        error: 'ValidationError',
-        message: 'Cart cannot be empty.'
-      });
-    }
-
-    const tenantIds = new Set<string>();
-    let subtotal = 0;
-    const resolvedItems: OrderItem[] = [];
-
-    for (const item of items) {
-      if (!item.productId || !item.variantSku || typeof item.quantity !== 'number' || item.quantity <= 0) {
-        return reply.status(400).send({
-          valid: false,
-          error: 'ValidationError',
-          message: 'Invalid item data in cart.'
-        });
-      }
-
-      const product = db.getProductById(item.productId);
-      if (!product) {
-        return reply.status(404).send({
-          valid: false,
-          error: 'NotFound',
-          message: `Product '${item.productId}' not found.`
-        });
-      }
-
-      tenantIds.add(product.tenantId);
-
-      // Single-seller policy check
-      if (tenantIds.size > 1) {
-        return reply.status(400).send({
-          valid: false,
-          error: 'MultiSellerError',
-          message: 'Your cart contains items from multiple brands. Virtual Try-On orders must be fulfilled by a single brand seller per order.'
-        });
-      }
-
-      const variant = product.variants.find(v => v.sku === item.variantSku);
-      if (!variant) {
-        return reply.status(404).send({
-          valid: false,
-          error: 'VariantNotFound',
-          message: `Variant '${item.variantSku}' not found on product '${product.name}'.`
-        });
-      }
-
-      if (variant.stockQuantity < item.quantity) {
-        return reply.status(400).send({
-          valid: false,
-          error: 'InsufficientStock',
-          message: `Insufficient stock for '${product.name}' (${variant.size}/${variant.color}). Requested: ${item.quantity}, available: ${variant.stockQuantity}`
-        });
-      }
-
-      const lineTotal = product.price * item.quantity;
-      subtotal += lineTotal;
-      resolvedItems.push({
-        productId: product.id,
-        variantSku: variant.sku,
-        productName: product.name,
-        size: variant.size,
-        color: variant.color,
-        quantity: item.quantity,
-        unitPrice: product.price,
-        lineTotal,
-        imageUrl: product.images[0]
-      });
-    }
-
-    const singleTenantId = Array.from(tenantIds)[0];
-    const tenant = db.getTenantById(singleTenantId);
-
-    if (!tenant || tenant.status !== 'ACTIVE') {
-      return reply.status(403).send({
-        valid: false,
-        error: 'SellerInactive',
-        message: 'The seller for these products is currently inactive.'
+        error: validation.error,
+        message: validation.message,
       });
     }
 
     return {
       valid: true,
-      singleTenantId,
-      brandName: tenant.name,
-      subtotal,
-      shippingFee: subtotal >= 150 ? 0 : 15.0,
-      total: subtotal + (subtotal >= 150 ? 0 : 15.0),
-      items: resolvedItems
+      singleTenantId: validation.tenantId,
+      brandName: validation.brandName,
+      subtotal: validation.subtotal,
+      shippingFee: validation.shippingFee,
+      total: validation.total,
+      items: validation.resolvedItems,
     };
   });
 
@@ -113,71 +168,52 @@ export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
     const body = (request.body as any) || {};
     const { items, shippingAddress, customerEmail } = body;
 
-    if (!items || !Array.isArray(items) || items.length === 0) {
-      return reply.status(400).send({ error: 'ValidationError', message: 'Cart cannot be empty.' });
-    }
-
-    if (!customerEmail || !shippingAddress || !shippingAddress.fullName || !shippingAddress.street || !shippingAddress.city) {
+    if (
+      typeof customerEmail !== 'string' ||
+      !EMAIL_REGEX.test(customerEmail.trim()) ||
+      !shippingAddress ||
+      typeof shippingAddress.fullName !== 'string' ||
+      !shippingAddress.fullName.trim() ||
+      typeof shippingAddress.street !== 'string' ||
+      !shippingAddress.street.trim() ||
+      typeof shippingAddress.city !== 'string' ||
+      !shippingAddress.city.trim()
+    ) {
       return reply.status(400).send({
         error: 'ValidationError',
-        message: 'customerEmail and complete shippingAddress (fullName, street, city, zipCode, country) are required.'
+        message: 'Valid customerEmail and complete shippingAddress (fullName, street, city, zipCode, country) are required.',
       });
     }
 
-    const tenantIds = new Set<string>();
-    let subtotal = 0;
-    const resolvedItems: OrderItem[] = [];
-
-    for (const item of items) {
-      const product = db.getProductById(item.productId);
-      if (!product) {
-        return reply.status(404).send({ error: 'NotFound', message: `Product '${item.productId}' not found.` });
-      }
-      tenantIds.add(product.tenantId);
-      if (tenantIds.size > 1) {
-        return reply.status(400).send({
-          error: 'MultiSellerError',
-          message: 'Single-seller policy violated: Items must be from the same brand.'
-        });
-      }
-
-      const variant = product.variants.find(v => v.sku === item.variantSku);
-      if (!variant || variant.stockQuantity < item.quantity) {
-        return reply.status(400).send({
-          error: 'InsufficientStock',
-          message: `Item '${product.name}' is out of stock.`
-        });
-      }
-
-      const lineTotal = product.price * item.quantity;
-      subtotal += lineTotal;
-      resolvedItems.push({
-        productId: product.id,
-        variantSku: variant.sku,
-        productName: product.name,
-        size: variant.size,
-        color: variant.color,
-        quantity: item.quantity,
-        unitPrice: product.price,
-        lineTotal,
-        imageUrl: product.images[0]
+    const validation = validateCartItems(items);
+    if (!validation.ok) {
+      return reply.status(validation.status).send({
+        error: validation.error,
+        message: validation.message,
       });
     }
 
-    const tenantId = Array.from(tenantIds)[0];
-    const shippingFee = subtotal >= 150 ? 0 : 15.0;
-    const totalAmount = subtotal + shippingFee;
+    // Optional customer association if a valid Bearer JWT is sent
+    let customerId: string | undefined;
+    const authHeader = request.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      try {
+        const decoded = request.server.jwt.verify<any>(authHeader.substring(7));
+        if (decoded?.userId) customerId = decoded.userId;
+      } catch {
+        // Guest checkout allowed if token absent/expired
+      }
+    }
 
     try {
       const order = await db.runTransaction(() => {
-        // Atomic stock adjustment
-        for (const item of resolvedItems) {
+        for (const item of validation.resolvedItems) {
           const adj = db.adjustInventory(
-            tenantId,
+            validation.tenantId,
             item.productId,
             item.variantSku,
             -item.quantity,
-            `Order Checkout`
+            'Order Checkout'
           );
           if (!adj.success) {
             throw new Error(`Inventory deduction failed: ${adj.error}`);
@@ -187,17 +223,18 @@ export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
         const now = Date.now();
         const newOrder: Order = {
           id: `ord_${Math.random().toString(36).substring(2, 9)}`,
-          tenantId,
-          customerEmail,
+          tenantId: validation.tenantId,
+          customerId,
+          customerEmail: customerEmail.trim().toLowerCase(),
           shippingAddress,
-          items: resolvedItems,
-          subtotal,
-          shippingFee,
-          totalAmount,
+          items: validation.resolvedItems,
+          subtotal: validation.subtotal,
+          shippingFee: validation.shippingFee,
+          totalAmount: validation.total,
           status: 'PROCESSING',
           paymentStatus: 'PAID',
           createdAt: now,
-          updatedAt: now
+          updatedAt: now,
         };
 
         db.createOrder(newOrder);
@@ -211,12 +248,12 @@ export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
         subtotal: order.subtotal,
         shippingFee: order.shippingFee,
         total: order.totalAmount,
-        order
+        order,
       });
     } catch (err: any) {
       return reply.status(400).send({
         error: 'OrderPlacementFailed',
-        message: err.message
+        message: err.message,
       });
     }
   };

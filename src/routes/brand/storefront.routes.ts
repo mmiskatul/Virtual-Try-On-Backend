@@ -1,45 +1,90 @@
+import crypto from 'node:crypto';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
-import { Tenant } from '../../domain/types.js';
+import { config } from '../../infrastructure/config.js';
+import { StorefrontSettings, Tenant } from '../../domain/types.js';
+
+const brandReadGuards = [authenticateToken, requireRole('BRAND_OWNER', 'STORE_MANAGER')];
+const brandOwnerGuards = [authenticateToken, requireRole('BRAND_OWNER')];
+
+function isSafeHttpUrl(url: unknown): url is string {
+  if (typeof url !== 'string' || !url.trim()) return false;
+  try {
+    const parsed = new URL(url.trim());
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function isValidInternalKey(headerValue: unknown): boolean {
+  if (typeof headerValue !== 'string' || !headerValue) return false;
+  const expected = Buffer.from(config.internalServiceKey);
+  const actual = Buffer.from(headerValue);
+  if (expected.length !== actual.length) return false;
+  return crypto.timingSafeEqual(expected, actual);
+}
+
+function sanitizeStorefrontSettings(raw: any, existing?: StorefrontSettings): StorefrontSettings {
+  const next: StorefrontSettings = { ...(existing || {}) };
+  if (typeof raw?.primaryColor === 'string' && /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(raw.primaryColor.trim())) {
+    next.primaryColor = raw.primaryColor.trim();
+  }
+  if (typeof raw?.accentColor === 'string' && /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(raw.accentColor.trim())) {
+    next.accentColor = raw.accentColor.trim();
+  }
+  if (typeof raw?.announcement === 'string') {
+    next.announcement = raw.announcement.slice(0, 200);
+  }
+  if (typeof raw?.aboutText === 'string') {
+    next.aboutText = raw.aboutText.slice(0, 2000);
+  }
+  if (isSafeHttpUrl(raw?.bannerImage)) {
+    next.bannerImage = raw.bannerImage.trim();
+  }
+  return next;
+}
 
 export async function brandStorefrontRoutes(app: FastifyInstance) {
   // Brand Profile & Storefront Customization
-  app.get('/api/v1/brand/profile', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
+  app.get('/api/v1/brand/profile', { preHandler: brandReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     return { tenant: request.tenant };
   });
 
-  app.put('/api/v1/brand/profile', { preHandler: [authenticateToken, requireRole('BRAND_OWNER')] }, async (request: FastifyRequest) => {
-    const body = request.body as Partial<Tenant>;
-    const updated = db.updateTenant(request.tenant!.id, {
-      name: body.name || request.tenant!.name,
-      description: body.description,
-      logoUrl: body.logoUrl,
-      bannerUrl: body.bannerUrl,
-      contactEmail: body.contactEmail || request.tenant!.contactEmail,
-      storefrontSettings: {
-        ...request.tenant!.storefrontSettings,
-        ...(body.storefrontSettings || {})
-      }
-    });
+  app.put('/api/v1/brand/profile', { preHandler: brandOwnerGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
+    const body = (request.body as Partial<Tenant>) || {};
+    const updates: Partial<Tenant> = {
+      name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : request.tenant.name,
+      description: typeof body.description === 'string' ? body.description : request.tenant.description,
+      contactEmail: typeof body.contactEmail === 'string' && body.contactEmail.includes('@')
+        ? body.contactEmail.trim()
+        : request.tenant.contactEmail,
+      storefrontSettings: sanitizeStorefrontSettings(body.storefrontSettings, request.tenant.storefrontSettings),
+    };
+    if (isSafeHttpUrl(body.logoUrl)) updates.logoUrl = body.logoUrl.trim();
+    if (isSafeHttpUrl(body.bannerUrl)) updates.bannerUrl = body.bannerUrl.trim();
+
+    const updated = db.updateTenant(request.tenant.id, updates);
     return { message: 'Brand profile updated successfully', tenant: updated };
   });
 
   // Dedicated storefront settings update
-  app.put('/api/v1/brand/storefront-settings', { preHandler: [authenticateToken, requireRole('BRAND_OWNER')] }, async (request: FastifyRequest) => {
-    const settings = request.body as any;
-    const updated = db.updateTenant(request.tenant!.id, {
-      storefrontSettings: {
-        ...request.tenant!.storefrontSettings,
-        ...settings
-      }
+  app.put('/api/v1/brand/storefront-settings', { preHandler: brandOwnerGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
+    const settings = (request.body as any) || {};
+    const updated = db.updateTenant(request.tenant.id, {
+      storefrontSettings: sanitizeStorefrontSettings(settings, request.tenant.storefrontSettings),
     });
     return { message: 'Storefront settings updated successfully', tenant: updated };
   });
 
   // Brand Analytics
-  app.get('/api/v1/brand/analytics', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
-    const tenantId = request.tenant!.id;
+  app.get('/api/v1/brand/analytics', { preHandler: brandReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
+    const tenantId = request.tenant.id;
     const products = db.getProductsByTenant(tenantId);
     const orders = db.getOrdersByTenant(tenantId);
     const subscription = db.getSubscription(tenantId);
@@ -74,7 +119,7 @@ export async function brandStorefrontRoutes(app: FastifyInstance) {
     };
   });
 
-  // Public/Internal Storefront Discovery
+  // Public Storefront Discovery (returns only public storefront fields, never private contactEmail)
   app.get('/api/v1/internal/storefront/:brandSlug', async (request: FastifyRequest, reply: FastifyReply) => {
     const { brandSlug } = request.params as { brandSlug: string };
     const tenant = db.getTenantBySlug(brandSlug);
@@ -82,10 +127,43 @@ export async function brandStorefrontRoutes(app: FastifyInstance) {
       return reply.status(404).send({ error: 'NotFound', message: 'Storefront not found or inactive.' });
     }
     const products = db.getStorefrontProducts(tenant.id);
-    return { tenant, products };
+    return {
+      tenant: {
+        id: tenant.id,
+        name: tenant.name,
+        slug: tenant.slug,
+        status: tenant.status,
+        logoUrl: tenant.logoUrl,
+        bannerUrl: tenant.bannerUrl,
+        description: tenant.description,
+        storefrontSettings: tenant.storefrontSettings,
+      },
+      products,
+    };
   });
 
-  app.get('/api/v1/internal/tenants', async () => {
-    return { tenants: db.getTenants() };
+  // Internal Tenants Directory (protected by x-internal-service-key or SUPER_ADMIN bearer token)
+  app.get('/api/v1/internal/tenants', async (request: FastifyRequest, reply: FastifyReply) => {
+    const internalKey = request.headers['x-internal-service-key'];
+    if (isValidInternalKey(internalKey)) {
+      return { tenants: db.getTenants() };
+    }
+
+    const authHeader = request.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      try {
+        const decoded = request.server.jwt.verify<any>(authHeader.substring(7));
+        if (decoded?.role === 'SUPER_ADMIN') {
+          return { tenants: db.getTenants() };
+        }
+      } catch {
+        // Fall through to 401/403
+      }
+    }
+
+    return reply.status(403).send({
+      error: 'Forbidden',
+      message: 'Internal service key or Super Admin authorization required.',
+    });
   });
 }

@@ -34,7 +34,11 @@ export const config = {
   internalServiceKey: process.env.INTERNAL_SERVICE_KEY || 'vton_internal_service_key_enterprise',
 
   aiServiceUrl: process.env.AI_SERVICE_URL || 'http://localhost:8000',
-  databaseUrl: process.env.DATABASE_URL || process.env.NEON_DATABASE_URL || '',
+  databaseUrl: process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || process.env.NEON_DATABASE_URL || '',
+  supabaseUrl: process.env.SUPABASE_URL || '',
+  supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
+  supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+  supabaseDbUrl: process.env.SUPABASE_DB_URL || '',
 
   cloudinaryUrl: process.env.CLOUDINARY_URL || '',
   cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || '',

@@ -214,8 +214,19 @@ export class PrismaDatabase {
 
   public async createUser(user: User): Promise<User> {
     if (!this.prisma) throw new Error('Prisma database is not connected');
-    const created = await this.prisma.user.create({
-      data: {
+    const created = await this.prisma.user.upsert({
+      where: { id: user.id },
+      update: {
+        tenantId: user.tenantId || null,
+        name: user.name,
+        email: user.email,
+        passwordHash: user.passwordHash,
+        role: user.role,
+        emailVerified: Boolean(user.emailVerified),
+        emailVerifiedAt: user.emailVerifiedAt ? BigInt(user.emailVerifiedAt) : null,
+        updatedAt: user.updatedAt ? BigInt(user.updatedAt) : null,
+      },
+      create: {
         id: user.id,
         tenantId: user.tenantId || null,
         name: user.name,
@@ -406,8 +417,21 @@ export class PrismaDatabase {
 
   public async createFabric(fabric: Fabric): Promise<Fabric> {
     if (!this.prisma) throw new Error('Prisma database is not connected');
-    const created = await this.prisma.fabric.create({
-      data: {
+    const created = await this.prisma.fabric.upsert({
+      where: { id: fabric.id },
+      update: {
+        name: fabric.name,
+        composition: fabric.composition,
+        color: fabric.color,
+        pattern: fabric.pattern,
+        weightGsm: fabric.weightGsm ?? null,
+        stretch: fabric.stretch ?? null,
+        transparency: fabric.transparency ?? null,
+        thickness: fabric.thickness ?? null,
+        careInstructions: fabric.careInstructions ?? null,
+        textureUrl: fabric.textureUrl ?? null,
+      },
+      create: {
         id: fabric.id,
         tenantId: fabric.tenantId,
         name: fabric.name,
@@ -424,6 +448,306 @@ export class PrismaDatabase {
       },
     });
     return this.mapFabric(created);
+  }
+
+  public async updateFabric(id: string, tenantId: string, updates: Partial<Fabric>): Promise<Fabric | undefined> {
+    if (!this.prisma) return undefined;
+    const data: any = {};
+    if (updates.name !== undefined) data.name = updates.name;
+    if (updates.composition !== undefined) data.composition = updates.composition;
+    if (updates.color !== undefined) data.color = updates.color;
+    if (updates.pattern !== undefined) data.pattern = updates.pattern;
+    if (updates.weightGsm !== undefined) data.weightGsm = updates.weightGsm;
+    if (updates.stretch !== undefined) data.stretch = updates.stretch;
+    if (updates.transparency !== undefined) data.transparency = updates.transparency;
+    if (updates.thickness !== undefined) data.thickness = updates.thickness;
+    if (updates.careInstructions !== undefined) data.careInstructions = updates.careInstructions;
+    if (updates.textureUrl !== undefined) data.textureUrl = updates.textureUrl;
+    const res = await this.prisma.fabric.updateMany({
+      where: { id, tenantId },
+      data,
+    });
+    if (res.count === 0) return undefined;
+    return this.getFabricById(id, tenantId);
+  }
+
+  public async deleteFabric(id: string, tenantId: string): Promise<boolean> {
+    if (!this.prisma) return false;
+    const res = await this.prisma.fabric.deleteMany({
+      where: { id, tenantId },
+    });
+    return res.count > 0;
+  }
+
+  public async hydrateAll(): Promise<{
+    tenants: Tenant[];
+    users: User[];
+    authTokens: AuthToken[];
+    products: Product[];
+    fabrics: Fabric[];
+    subscriptions: Subscription[];
+    orders: Order[];
+    inventoryLogs: InventoryLog[];
+    auditLogs: AuditLog[];
+  } | null> {
+    if (!this.prisma || !this.connected) return null;
+    const now = BigInt(Date.now());
+    const [
+      tenantRows,
+      userRows,
+      tokenRows,
+      productRows,
+      fabricRows,
+      subRows,
+      orderRows,
+      invRows,
+      auditRows,
+    ] = await Promise.all([
+      this.prisma.tenant.findMany({ orderBy: { createdAt: 'asc' } }),
+      this.prisma.user.findMany({ orderBy: { createdAt: 'asc' } }),
+      this.prisma.authToken.findMany({
+        where: { usedAt: null, expiresAt: { gt: now } },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.product.findMany({ orderBy: { createdAt: 'asc' } }),
+      this.prisma.fabric.findMany({ orderBy: { createdAt: 'asc' } }),
+      this.prisma.subscription.findMany(),
+      this.prisma.order.findMany({ orderBy: { createdAt: 'desc' } }),
+      this.prisma.inventoryLog.findMany({ orderBy: { timestamp: 'desc' }, take: 500 }),
+      this.prisma.auditLog.findMany({ orderBy: { timestamp: 'desc' }, take: 500 }),
+    ]);
+
+    return {
+      tenants: tenantRows.map((r) => this.mapTenant(r)),
+      users: userRows.map((r) => this.mapUser(r)),
+      authTokens: tokenRows.map((r) => this.mapAuthToken(r)),
+      products: productRows.map((r) => this.mapProduct(r)),
+      fabrics: fabricRows.map((r) => this.mapFabric(r)),
+      subscriptions: subRows.map((r) => this.mapSubscription(r)),
+      orders: orderRows.map((r) => this.mapOrder(r)),
+      inventoryLogs: invRows.map((r) => this.mapInventoryLog(r)),
+      auditLogs: auditRows.map((r) => this.mapAuditLog(r)),
+    };
+  }
+
+  public async getTableCounts(): Promise<Record<string, number> | null> {
+    if (!this.prisma || !this.connected) return null;
+    const [tenants, users, authTokens, products, fabrics, orders, auditLogs] = await Promise.all([
+      this.prisma.tenant.count(),
+      this.prisma.user.count(),
+      this.prisma.authToken.count(),
+      this.prisma.product.count(),
+      this.prisma.fabric.count(),
+      this.prisma.order.count(),
+      this.prisma.auditLog.count(),
+    ]);
+    return { tenants, users, authTokens, products, fabrics, orders, auditLogs };
+  }
+
+  public async syncCollections(collections: {
+    tenants: Tenant[];
+    users: User[];
+    products: Product[];
+    fabrics: Fabric[];
+    subscriptions: Subscription[];
+    orders: Order[];
+    auditLogs: AuditLog[];
+  }): Promise<{ synced: Record<string, number> }> {
+    if (!this.prisma || !this.connected) {
+      throw new Error('PostgreSQL / Supabase connection is not active');
+    }
+
+    for (const t of collections.tenants) {
+      await this.prisma.tenant.upsert({
+        where: { id: t.id },
+        update: {
+          name: t.name,
+          slug: t.slug,
+          status: t.status,
+          logoUrl: t.logoUrl || null,
+          bannerUrl: t.bannerUrl || null,
+          description: t.description || null,
+          contactEmail: t.contactEmail,
+          storefrontSettings: (t.storefrontSettings as any) || {},
+          updatedAt: BigInt(t.updatedAt),
+        },
+        create: {
+          id: t.id,
+          name: t.name,
+          slug: t.slug,
+          status: t.status,
+          logoUrl: t.logoUrl || null,
+          bannerUrl: t.bannerUrl || null,
+          description: t.description || null,
+          contactEmail: t.contactEmail,
+          storefrontSettings: (t.storefrontSettings as any) || {},
+          createdAt: BigInt(t.createdAt),
+          updatedAt: BigInt(t.updatedAt),
+        },
+      });
+    }
+
+    for (const u of collections.users) {
+      await this.prisma.user.upsert({
+        where: { id: u.id },
+        update: {
+          tenantId: u.tenantId || null,
+          name: u.name,
+          email: u.email,
+          passwordHash: u.passwordHash,
+          role: u.role,
+          emailVerified: Boolean(u.emailVerified),
+          emailVerifiedAt: u.emailVerifiedAt ? BigInt(u.emailVerifiedAt) : null,
+          updatedAt: u.updatedAt ? BigInt(u.updatedAt) : null,
+        },
+        create: {
+          id: u.id,
+          tenantId: u.tenantId || null,
+          name: u.name,
+          email: u.email,
+          passwordHash: u.passwordHash,
+          role: u.role,
+          emailVerified: Boolean(u.emailVerified),
+          emailVerifiedAt: u.emailVerifiedAt ? BigInt(u.emailVerifiedAt) : null,
+          updatedAt: u.updatedAt ? BigInt(u.updatedAt) : null,
+          createdAt: BigInt(u.createdAt),
+        },
+      });
+    }
+
+    for (const f of collections.fabrics) {
+      await this.createFabric(f);
+    }
+
+    for (const p of collections.products) {
+      await this.prisma.product.upsert({
+        where: { id: p.id },
+        update: {
+          name: p.name,
+          slug: p.slug,
+          description: p.description || null,
+          category: p.category,
+          subCategory: p.subCategory || null,
+          collection: p.collection || null,
+          sku: p.sku,
+          price: p.price,
+          compareAtPrice: p.compareAtPrice ?? null,
+          images: (p.images as any) || [],
+          fabricIds: (p.fabricIds as any) || [],
+          tags: (p.tags as any) || [],
+          brandStorefrontPublished: p.brandStorefrontPublished,
+          marketplacePublished: p.marketplacePublished,
+          isTryOnEligible: p.isTryOnEligible,
+          tryOnCategory: p.tryOnCategory,
+          specs: (p.specs as any) || {},
+          variants: (p.variants as any) || [],
+          updatedAt: BigInt(p.updatedAt),
+        },
+        create: {
+          id: p.id,
+          tenantId: p.tenantId,
+          name: p.name,
+          slug: p.slug,
+          description: p.description || null,
+          category: p.category,
+          subCategory: p.subCategory || null,
+          collection: p.collection || null,
+          sku: p.sku,
+          price: p.price,
+          compareAtPrice: p.compareAtPrice ?? null,
+          images: (p.images as any) || [],
+          fabricIds: (p.fabricIds as any) || [],
+          tags: (p.tags as any) || [],
+          brandStorefrontPublished: p.brandStorefrontPublished,
+          marketplacePublished: p.marketplacePublished,
+          isTryOnEligible: p.isTryOnEligible,
+          tryOnCategory: p.tryOnCategory,
+          specs: (p.specs as any) || {},
+          variants: (p.variants as any) || [],
+          createdAt: BigInt(p.createdAt),
+          updatedAt: BigInt(p.updatedAt),
+        },
+      });
+    }
+
+    for (const s of collections.subscriptions) {
+      await this.prisma.subscription.upsert({
+        where: { tenantId: s.tenantId },
+        update: {
+          plan: s.plan,
+          productLimit: s.productLimit,
+          tryOnMonthlyQuota: s.tryOnMonthlyQuota,
+          tryOnUsed: s.tryOnUsed,
+          status: s.status,
+          updatedAt: BigInt(s.updatedAt),
+        },
+        create: {
+          id: `sub_${s.tenantId}`,
+          tenantId: s.tenantId,
+          plan: s.plan,
+          productLimit: s.productLimit,
+          tryOnMonthlyQuota: s.tryOnMonthlyQuota,
+          tryOnUsed: s.tryOnUsed,
+          status: s.status,
+          updatedAt: BigInt(s.updatedAt),
+        },
+      });
+    }
+
+    for (const o of collections.orders) {
+      await this.prisma.order.upsert({
+        where: { id: o.id },
+        update: {
+          status: o.status,
+          paymentStatus: o.paymentStatus,
+          updatedAt: BigInt(o.updatedAt),
+        },
+        create: {
+          id: o.id,
+          tenantId: o.tenantId,
+          customerId: o.customerId || null,
+          customerEmail: o.customerEmail,
+          status: o.status,
+          totalAmount: o.totalAmount,
+          subtotal: o.subtotal,
+          shippingFee: o.shippingFee || 0,
+          shippingAddress: (o.shippingAddress as any) || {},
+          items: (o.items as any) || [],
+          paymentStatus: o.paymentStatus || 'PENDING',
+          createdAt: BigInt(o.createdAt),
+          updatedAt: BigInt(o.updatedAt),
+        },
+      });
+    }
+
+    for (const a of collections.auditLogs.slice(0, 100)) {
+      await this.prisma.auditLog.upsert({
+        where: { id: a.id },
+        update: {},
+        create: {
+          id: a.id,
+          tenantId: a.tenantId || null,
+          actorId: a.actorId,
+          actorRole: a.actorRole,
+          action: a.action,
+          entity: a.entity,
+          entityId: a.entityId || null,
+          details: (a.details as any) || {},
+          timestamp: BigInt(a.timestamp),
+        },
+      });
+    }
+
+    return {
+      synced: {
+        tenants: collections.tenants.length,
+        users: collections.users.length,
+        fabrics: collections.fabrics.length,
+        products: collections.products.length,
+        subscriptions: collections.subscriptions.length,
+        orders: collections.orders.length,
+      },
+    };
   }
 
   // ==========================================
@@ -497,14 +821,15 @@ export class PrismaDatabase {
   public async updateOrderStatus(id: string, tenantId: string, status: OrderStatus): Promise<Order | undefined> {
     if (!this.prisma) return undefined;
     try {
-      const updated = await this.prisma.order.update({
-        where: { id },
+      const res = await this.prisma.order.updateMany({
+        where: { id, tenantId },
         data: {
           status,
           updatedAt: BigInt(Date.now()),
         },
       });
-      return this.mapOrder(updated);
+      if (res.count === 0) return undefined;
+      return this.getOrderById(id, tenantId);
     } catch {
       return undefined;
     }

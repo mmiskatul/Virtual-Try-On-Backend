@@ -1,20 +1,23 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
 import { idempotencyManager } from '../../infrastructure/idempotency.js';
+
+const brandGuards = [authenticateToken, requireRole('BRAND_OWNER', 'STORE_MANAGER')];
 
 export async function brandInventoryRoutes(app: FastifyInstance) {
   // Adjust Stock Atomically
-  app.post('/api/v1/inventory/adjust', { preHandler: [authenticateToken] }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/inventory/adjust', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const { productId, variantSku, change, reason } = (request.body as any) || {};
-    if (!productId || !variantSku || typeof change !== 'number') {
+    if (!productId || !variantSku || typeof change !== 'number' || !Number.isInteger(change)) {
       return reply.status(400).send({
         error: 'ValidationError',
-        message: 'productId, variantSku, and change (number) are required.'
+        message: 'productId, variantSku, and integer change are required.'
       });
     }
 
-    const tenantId = request.tenant!.id;
+    const tenantId = request.tenant.id;
     const idempotencyKey = (request.headers['idempotency-key'] || request.headers['x-idempotency-key']) as string | undefined;
     let compositeKey: string | undefined;
 
@@ -85,9 +88,10 @@ export async function brandInventoryRoutes(app: FastifyInstance) {
   });
 
   // Inventory Audit Logs
-  app.get('/api/v1/inventory/logs', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
+  app.get('/api/v1/inventory/logs', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const { productId } = request.query as { productId?: string };
-    const logs = db.getInventoryLogs(request.tenant!.id, productId);
+    const logs = db.getInventoryLogs(request.tenant.id, productId);
     return { logs };
   });
 }
