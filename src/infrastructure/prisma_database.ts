@@ -259,6 +259,16 @@ export class PrismaDatabase {
     return this.getUserById(id);
   }
 
+  public async deleteUser(id: string): Promise<void> {
+    if (!this.prisma) return;
+    await this.prisma.user.deleteMany({ where: { id } });
+  }
+
+  public async deleteTenant(id: string): Promise<void> {
+    if (!this.prisma) return;
+    await this.prisma.tenant.deleteMany({ where: { id } });
+  }
+
   public async createAuthToken(token: AuthToken): Promise<AuthToken> {
     if (!this.prisma) throw new Error('Prisma database is not connected');
     const created = await this.prisma.authToken.create({

@@ -165,6 +165,16 @@ export async function customerAuthRoutes(app: FastifyInstance) {
     const created = db.createUser(newUser);
     const mailResult = await dispatchVerificationForUser(created, 'marketplace', extractRequestOrigin(request));
 
+    if (!mailResult.delivered) {
+      db.deleteUser(created.id);
+      return reply.status(502).send({
+        error: 'EmailDeliveryFailed',
+        message: mailResult.error
+          ? `Verification email could not be sent: ${mailResult.error}`
+          : 'Verification email could not be sent right now. Please try again shortly.',
+      });
+    }
+
     db.recordAuditLog({
       actorId: created.id,
       actorRole: created.role,
@@ -178,14 +188,7 @@ export async function customerAuthRoutes(app: FastifyInstance) {
       message: 'Account created! Please verify your email address before signing in.',
       requiresEmailVerification: true,
       user: sanitizePublicUser(created),
-      emailDelivered: mailResult.delivered,
-      ...(!mailResult.delivered
-        ? {
-            warning: mailResult.error
-              ? `Account created, but verification email could not be sent: ${mailResult.error}`
-              : 'Account created, but the verification email could not be sent. Use "Resend verification" in a minute.',
-          }
-        : {}),
+      emailDelivered: true,
     });
   });
 

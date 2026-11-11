@@ -676,6 +676,15 @@ export class Database {
     return this.data.tenants[idx];
   }
 
+  public deleteTenant(id: string): void {
+    this.data.tenants = this.data.tenants.filter(t => t.id !== id);
+    this.data.subscriptions = this.data.subscriptions.filter(s => s.tenantId !== id);
+    this.save();
+    this.enqueuePrismaSync(async (prisma) => {
+      await prisma.deleteTenant(id);
+    });
+  }
+
   // --- Users ---
   public getUsers(): User[] {
     return this.data.users;
@@ -717,6 +726,15 @@ export class Database {
       await prisma.updateUser(id, updates);
     });
     return this.data.users[idx];
+  }
+
+  public deleteUser(id: string): void {
+    this.data.users = this.data.users.filter(u => u.id !== id);
+    this.data.authTokens = this.data.authTokens.filter(t => t.userId !== id);
+    this.save();
+    this.enqueuePrismaSync(async (prisma) => {
+      await prisma.deleteUser(id);
+    });
   }
 
   // --- Auth Tokens (Email Verification & Password Reset) ---

@@ -101,6 +101,17 @@ export async function brandAuthRoutes(app: FastifyInstance) {
 
     const mailResult = await dispatchVerificationForUser(user, 'brand', extractRequestOrigin(request));
 
+    if (!mailResult.delivered) {
+      db.deleteUser(user.id);
+      db.deleteTenant(tenant.id);
+      return reply.status(502).send({
+        error: 'EmailDeliveryFailed',
+        message: mailResult.error
+          ? `Verification email could not be sent: ${mailResult.error}`
+          : 'Verification email could not be sent right now. Please try again shortly.',
+      });
+    }
+
     db.recordAuditLog({
       tenantId: tenant.id,
       actorId: user.id,
@@ -116,14 +127,7 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       requiresEmailVerification: true,
       user: sanitizePublicUser(user),
       tenant,
-      emailDelivered: mailResult.delivered,
-      ...(!mailResult.delivered
-        ? {
-            warning: mailResult.error
-              ? `Account created, but verification email could not be sent: ${mailResult.error}`
-              : 'Account created, but the verification email could not be sent. Use "Resend verification" in a minute.',
-          }
-        : {}),
+      emailDelivered: true,
     });
   });
 
