@@ -222,6 +222,24 @@ describe('Phase 2: Identity, Dual JWT/Supabase, RBAC, Tenant Scope, View-As & Au
     // Mask IP helper
     expect(maskIpAddress('192.168.10.42')).toBe('192.168.10.xxx');
 
+    // Unified Marketplace check-email flow
+    const checkUnknown = await app.inject({
+      method: 'POST',
+      url: '/api/v1/marketplace/auth/check-email',
+      payload: { email: `fresh_${Date.now()}@example.com` },
+    });
+    expect(checkUnknown.statusCode).toBe(200);
+    expect(JSON.parse(checkUnknown.body).exists).toBe(false);
+
+    const checkKnown = await app.inject({
+      method: 'POST',
+      url: '/api/v1/marketplace/auth/check-email',
+      payload: { email: 'sarah.miller@example.com' },
+    });
+    expect(checkKnown.statusCode).toBe(200);
+    expect(JSON.parse(checkKnown.body).exists).toBe(true);
+    expect(JSON.parse(checkKnown.body).emailVerified).toBe(true);
+
     await app.close();
   });
 });

@@ -3,6 +3,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { AuthPortal, AuthToken, AuthTokenType, User } from '../../domain/types.js';
 import { db } from '../../infrastructure/database.js';
 import { emailService, EmailSendResult } from '../../infrastructure/email.service.js';
+import { createUserSession } from '../../modules/auth/jwt.verifier.js';
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -203,9 +204,22 @@ export function registerSharedAuthRoutes(
       details: { email: user.email, portal: tokenRecord.portal },
     });
 
+    let authToken: string | undefined;
+    let sessionId: string | undefined;
+    if (defaultPortal === 'marketplace' && user.role === 'CUSTOMER') {
+      const session = await createUserSession({
+        userId: user.id,
+        deviceLabel: (request.headers['user-agent'] as string) || 'Marketplace Verified',
+        ipAddress: request.ip,
+      });
+      sessionId = session.id;
+      authToken = app.jwt.sign({ userId: user.id, role: user.role, email: user.email, sid: session.id });
+    }
+
     return {
       message: 'Email verified successfully! You can now sign in to your account.',
       user: sanitizePublicUser(updatedUser || user),
+      ...(authToken ? { token: authToken, sessionId } : {}),
     };
   });
 

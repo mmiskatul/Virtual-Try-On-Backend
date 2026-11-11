@@ -1,6 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import crypto from 'node:crypto';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import { getValidatedEnv } from '../../infrastructure/env.schema.js';
 import { User } from '../../domain/types.js';
 import { createUserSession } from '../../modules/auth/jwt.verifier.js';
 import { recordAudit } from '../../modules/audit/audit.service.js';
@@ -15,6 +17,83 @@ import {
 } from '../auth/auth.service.js';
 
 export async function customerAuthRoutes(app: FastifyInstance) {
+  // Email existence probe for unified two-option (Google + Email -> Sign In or Create Account) flow
+  app.post('/api/v1/marketplace/auth/check-email', async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = (request.body as any) || {};
+    const rawEmail = typeof body.email === 'string' ? body.email : '';
+    const email = normalizeEmail(rawEmail);
+    if (!email || !isValidEmail(email)) {
+      return reply.status(400).send({
+        error: 'ValidationError',
+        message: 'Please enter a valid email address.',
+      });
+    }
+
+    const user = db.getUserByEmail(email);
+    if (!user) {
+      return { exists: false, email, emailVerified: false };
+    }
+    if (user.role !== 'CUSTOMER') {
+      return {
+        exists: true,
+        portalMismatch: true,
+        email,
+        message: 'This email belongs to a Brand or Admin account. Please sign in on that portal.',
+      };
+    }
+
+    return {
+      exists: true,
+      email: user.email,
+      name: user.name,
+      emailVerified: Boolean(user.emailVerified),
+    };
+  });
+
+  // Trusted NextAuth Google OAuth Customer Sync (protected by X-Service-Key)
+  app.post('/api/v1/marketplace/auth/oauth-google', async (request: FastifyRequest, reply: FastifyReply) => {
+    const keyHeader = request.headers['x-service-key'];
+    const expectedKey = getValidatedEnv().INTERNAL_SERVICE_KEY;
+    if (
+      typeof keyHeader !== 'string' ||
+      keyHeader.length !== expectedKey.length ||
+      !crypto.timingSafeEqual(Buffer.from(keyHeader), Buffer.from(expectedKey))
+    ) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Invalid internal X-Service-Key.' });
+    }
+
+    const body = (request.body as any) || {};
+    const email = typeof body.email === 'string' ? normalizeEmail(body.email) : '';
+    const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : email.split('@')[0] || 'Customer';
+    if (!email || !isValidEmail(email)) {
+      return reply.status(400).send({ error: 'ValidationError', message: 'Valid Google email required.' });
+    }
+
+    let user = db.getUserByEmail(email);
+    if (!user) {
+      user = db.createUser({
+        id: `user_cust_${Math.random().toString(36).substring(2, 9)}`,
+        name,
+        email,
+        passwordHash: db.hashPassword(crypto.randomBytes(24).toString('hex')),
+        role: 'CUSTOMER',
+        emailVerified: true,
+        emailVerifiedAt: Date.now(),
+        createdAt: Date.now(),
+      });
+    } else if (!user.emailVerified) {
+      user = db.updateUser(user.id, { emailVerified: true, emailVerifiedAt: Date.now() }) || user;
+    }
+
+    const session = await createUserSession({
+      userId: user.id,
+      deviceLabel: 'Google OAuth Web',
+      ipAddress: request.ip,
+    });
+    const token = app.jwt.sign({ userId: user.id, role: user.role, email: user.email, sid: session.id });
+    return { token, sessionId: session.id, user: sanitizePublicUser(user) };
+  });
+
   // Customer Registration (with Email Verification)
   app.post('/api/v1/marketplace/auth/register', async (request: FastifyRequest, reply: FastifyReply) => {
     const body = (request.body as any) || {};
