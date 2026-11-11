@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import crypto from 'node:crypto';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import { getValidatedEnv } from '../../infrastructure/env.schema.js';
 import { User } from '../../domain/types.js';
 import { createUserSession } from '../../modules/auth/jwt.verifier.js';
 import { recordAudit } from '../../modules/audit/audit.service.js';
@@ -68,7 +69,7 @@ export async function customerAuthRoutes(app: FastifyInstance) {
       return reply.status(502).send({ error: 'UpstreamError', message: 'Unable to verify Google ID token.' });
     }
 
-    const expectedClientId = process.env.GOOGLE_CLIENT_ID?.trim();
+    const expectedClientId = getValidatedEnv().GOOGLE_CLIENT_ID.trim();
     if (expectedClientId && tokenInfo.aud !== expectedClientId) {
       return reply.status(403).send({ error: 'Forbidden', message: 'Google token audience mismatch.' });
     }

@@ -15,6 +15,9 @@ const envSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional().default(''),
   SUPABASE_JWT_SECRET: z.string().optional().default(''),
 
+  // Optional Google OAuth Client ID (audience verification for marketplace Google sign-in)
+  GOOGLE_CLIENT_ID: z.string().optional().default(''),
+
   // Async infra
   RABBITMQ_URL: z.string().optional().default(''),
   REDIS_URL: z.string().optional().default(''),

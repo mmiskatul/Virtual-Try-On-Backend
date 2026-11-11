@@ -7,6 +7,7 @@ import { seedTestUsers } from './helpers.js';
 import { hasPermission, ROLE_DEFINITIONS } from '../src/modules/rbac/rbac.catalog.js';
 import { maskIpAddress } from '../src/modules/audit/audit.service.js';
 import { verifySupabaseJwt } from '../src/modules/auth/jwt.verifier.js';
+import { getValidatedEnv } from '../src/infrastructure/env.schema.js';
 
 function signHs256Jwt(payload: Record<string, unknown>, secret: string): string {
   const b64u = (obj: unknown) =>
@@ -239,6 +240,61 @@ describe('Phase 2: Identity, Dual JWT/Supabase, RBAC, Tenant Scope, View-As & Au
     expect(checkKnown.statusCode).toBe(200);
     expect(JSON.parse(checkKnown.body).exists).toBe(true);
     expect(JSON.parse(checkKnown.body).emailVerified).toBe(true);
+
+    // Google OAuth sync rejects missing idToken
+    const missingGoogleToken = await app.inject({
+      method: 'POST',
+      url: '/api/v1/marketplace/auth/oauth-google',
+      payload: { email: 'sarah.miller@example.com' },
+    });
+    expect(missingGoogleToken.statusCode).toBe(401);
+
+    // Google OAuth sync verifies Google token claims and enforces customer portal role
+    const originalFetch = globalThis.fetch;
+    const configuredClientId = getValidatedEnv().GOOGLE_CLIENT_ID.trim();
+    try {
+      globalThis.fetch = (async () =>
+        new Response(
+          JSON.stringify({
+            email: 'sarah.miller@example.com',
+            email_verified: 'true',
+            name: 'Sarah Miller',
+            ...(configuredClientId ? { aud: configuredClientId } : {}),
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )) as typeof fetch;
+
+      const googleOk = await app.inject({
+        method: 'POST',
+        url: '/api/v1/marketplace/auth/oauth-google',
+        payload: { idToken: 'mock_google_id_token' },
+      });
+      expect(googleOk.statusCode, googleOk.body).toBe(200);
+      const googleOkBody = JSON.parse(googleOk.body);
+      expect(googleOkBody.token).toBeTruthy();
+      expect(googleOkBody.user.email).toBe('sarah.miller@example.com');
+
+      globalThis.fetch = (async () =>
+        new Response(
+          JSON.stringify({
+            email: 'elena@auraatelier.com',
+            email_verified: 'true',
+            name: 'Elena Rostova',
+            ...(configuredClientId ? { aud: configuredClientId } : {}),
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } }
+        )) as typeof fetch;
+
+      const googleMismatch = await app.inject({
+        method: 'POST',
+        url: '/api/v1/marketplace/auth/oauth-google',
+        payload: { idToken: 'mock_google_brand_token' },
+      });
+      expect(googleMismatch.statusCode).toBe(403);
+      expect(JSON.parse(googleMismatch.body).error).toBe('PortalMismatch');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
 
     await app.close();
   });
