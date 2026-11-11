@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.data/
+.env
+.env.*
+!.env.example
+.git/
+.gitignore
+test/
+coverage/
+*.log
+npm-debug.log*
+

@@ -47,12 +47,27 @@ function resolvePortal(requestedPortal: unknown, fallback: AuthPortal): AuthPort
   return fallback;
 }
 
+export function extractRequestOrigin(request: FastifyRequest): string | undefined {
+  const origin = request.headers.origin;
+  if (typeof origin === 'string' && origin.trim()) return origin.trim();
+  const referer = request.headers.referer;
+  if (typeof referer === 'string' && referer.trim()) {
+    try {
+      return new URL(referer).origin;
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
+}
+
 async function issueAuthTokenAndSendEmail(params: {
   user: User;
   type: AuthTokenType;
   portal: AuthPortal;
+  requestOrigin?: string;
 }): Promise<EmailSendResult> {
-  const { user, type, portal } = params;
+  const { user, type, portal, requestOrigin } = params;
   const now = Date.now();
   const ttlMs = type === 'EMAIL_VERIFICATION' ? EMAIL_VERIFICATION_TTL_MS : PASSWORD_RESET_TTL_MS;
   const expiresInMinutes = Math.round(ttlMs / 60000);
@@ -83,6 +98,7 @@ async function issueAuthTokenAndSendEmail(params: {
       rawToken,
       otpCode,
       expiresInMinutes,
+      requestOrigin,
     });
   }
 
@@ -93,14 +109,16 @@ async function issueAuthTokenAndSendEmail(params: {
     rawToken,
     otpCode,
     expiresInMinutes,
+    requestOrigin,
   });
 }
 
-export async function dispatchVerificationForUser(user: User, portal: AuthPortal) {
+export async function dispatchVerificationForUser(user: User, portal: AuthPortal, requestOrigin?: string) {
   return issueAuthTokenAndSendEmail({
     user,
     type: 'EMAIL_VERIFICATION',
     portal,
+    requestOrigin,
   });
 }
 
@@ -227,7 +245,7 @@ export function registerSharedAuthRoutes(
     }
 
     const portal = resolvePortal(body.portal, defaultPortal);
-    const mailResult = await dispatchVerificationForUser(user, portal);
+    const mailResult = await dispatchVerificationForUser(user, portal, extractRequestOrigin(request));
 
     return {
       message: 'Verification email sent! Check your inbox for the verification link or 6-digit code.',
@@ -264,6 +282,7 @@ export function registerSharedAuthRoutes(
         user,
         type: 'PASSWORD_RESET',
         portal,
+        requestOrigin: extractRequestOrigin(request),
       });
       devPreview = mailResult.preview;
 

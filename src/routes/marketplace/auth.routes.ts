@@ -4,6 +4,7 @@ import { authenticateToken } from '../../infrastructure/auth.guard.js';
 import { User } from '../../domain/types.js';
 import {
   dispatchVerificationForUser,
+  extractRequestOrigin,
   isValidEmail,
   normalizeEmail,
   registerSharedAuthRoutes,
@@ -59,7 +60,7 @@ export async function customerAuthRoutes(app: FastifyInstance) {
       createdAt: Date.now(),
     };
     const created = db.createUser(newUser);
-    const mailResult = await dispatchVerificationForUser(created, 'marketplace');
+    const mailResult = await dispatchVerificationForUser(created, 'marketplace', extractRequestOrigin(request));
 
     db.recordAuditLog({
       actorId: created.id,

@@ -4,6 +4,7 @@ import { authenticateToken } from '../../infrastructure/auth.guard.js';
 import { Tenant } from '../../domain/types.js';
 import {
   dispatchVerificationForUser,
+  extractRequestOrigin,
   isValidEmail,
   normalizeEmail,
   registerSharedAuthRoutes,
@@ -96,7 +97,7 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       createdAt: now,
     });
 
-    const mailResult = await dispatchVerificationForUser(user, 'brand');
+    const mailResult = await dispatchVerificationForUser(user, 'brand', extractRequestOrigin(request));
 
     db.recordAuditLog({
       tenantId: tenant.id,

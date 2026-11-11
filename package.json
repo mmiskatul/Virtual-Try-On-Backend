@@ -6,8 +6,9 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "tsx src/index.ts",
+    "build": "prisma generate && tsc",
+    "start": "node dist/index.js",
+    "start:ts": "tsx src/index.ts",
     "test": "tsx test/backend.test.ts",
     "test:auth": "tsx test/auth.test.ts",
     "test:security": "tsx test/security.test.ts",

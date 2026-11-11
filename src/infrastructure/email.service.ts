@@ -33,26 +33,49 @@ function escapeHtml(input: string): string {
     .replace(/'/g, '&#39;');
 }
 
-function getPortalMeta(portal: AuthPortal): { title: string; accent: string; baseUrl: string } {
+function isTrustedPortalOrigin(urlStr: string): string | undefined {
+  try {
+    const parsed = new URL(urlStr);
+    const host = parsed.hostname.toLowerCase();
+    if (
+      (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      (host === 'localhost' || host === '127.0.0.1')
+    ) {
+      return parsed.origin;
+    }
+    if (
+      parsed.protocol === 'https:' &&
+      (host.endsWith('.vercel.app') || host === 'vton-platform.io' || host.endsWith('.vton-platform.io'))
+    ) {
+      return parsed.origin;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getPortalMeta(portal: AuthPortal, requestOrigin?: string): { title: string; accent: string; baseUrl: string } {
+  const safeOrigin = requestOrigin ? isTrustedPortalOrigin(requestOrigin) : undefined;
   switch (portal) {
     case 'brand':
       return {
         title: 'V-TRY Brand Merchant Portal',
         accent: '#0ea5e9',
-        baseUrl: config.brandDashboardUrl.replace(/\/$/, ''),
+        baseUrl: safeOrigin || config.brandDashboardUrl.replace(/\/$/, ''),
       };
     case 'admin':
       return {
         title: 'V-TRY Platform Governance',
         accent: '#f59e0b',
-        baseUrl: config.superAdminUrl.replace(/\/$/, ''),
+        baseUrl: safeOrigin || config.superAdminUrl.replace(/\/$/, ''),
       };
     case 'marketplace':
     default:
       return {
         title: 'V-TRY Fashion Marketplace',
         accent: '#9333ea',
-        baseUrl: config.marketplaceUrl.replace(/\/$/, ''),
+        baseUrl: safeOrigin || config.marketplaceUrl.replace(/\/$/, ''),
       };
   }
 }
@@ -255,8 +278,9 @@ class EmailService {
     rawToken: string;
     otpCode: string;
     expiresInMinutes: number;
+    requestOrigin?: string;
   }): Promise<EmailSendResult> {
-    const meta = getPortalMeta(params.portal);
+    const meta = getPortalMeta(params.portal, params.requestOrigin);
     const verifyUrl = `${meta.baseUrl}/verify-email?token=${encodeURIComponent(params.rawToken)}&email=${encodeURIComponent(params.to)}`;
     const safeName = escapeHtml(params.name || 'there');
 
@@ -310,8 +334,9 @@ class EmailService {
     rawToken: string;
     otpCode: string;
     expiresInMinutes: number;
+    requestOrigin?: string;
   }): Promise<EmailSendResult> {
-    const meta = getPortalMeta(params.portal);
+    const meta = getPortalMeta(params.portal, params.requestOrigin);
     const resetUrl = `${meta.baseUrl}/reset-password?token=${encodeURIComponent(params.rawToken)}&email=${encodeURIComponent(params.to)}`;
     const safeName = escapeHtml(params.name || 'there');
 
