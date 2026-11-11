@@ -2,17 +2,17 @@ import { Resend } from 'resend';
 import { config } from './config.js';
 import { AuthPortal } from '../domain/types.js';
 
+export interface EmailPreviewPayload {
+  actionUrl?: string;
+  otpCode?: string;
+  expiresInMinutes?: number;
+}
+
 export interface EmailSendResult {
   delivered: boolean;
   error?: string;
-  warning?: string;
   provider: 'resend' | 'dev-preview';
   messageId?: string;
-  preview?: {
-    actionUrl?: string;
-    otpCode?: string;
-    expiresInMinutes?: number;
-  };
 }
 
 interface BaseMailPayload {
@@ -20,11 +20,7 @@ interface BaseMailPayload {
   subject: string;
   html: string;
   text: string;
-  preview?: {
-    actionUrl?: string;
-    otpCode?: string;
-    expiresInMinutes?: number;
-  };
+  preview?: EmailPreviewPayload;
 }
 
 export interface ResendOverrideOptions {
@@ -69,7 +65,11 @@ function isTrustedPortalOrigin(urlStr: string): string | undefined {
     }
     if (
       parsed.protocol === 'https:' &&
-      (host.endsWith('.vercel.app') || host === 'vton-platform.io' || host.endsWith('.vton-platform.io'))
+      (host.endsWith('.vercel.app') ||
+        host === 'vtrystudio.com' ||
+        host.endsWith('.vtrystudio.com') ||
+        host === 'vton-platform.io' ||
+        host.endsWith('.vton-platform.io'))
     ) {
       return parsed.origin;
     }
@@ -107,6 +107,8 @@ function getPortalMeta(portal: AuthPortal, requestOrigin?: string): { title: str
 class EmailService {
   private resendClient: Resend | null = null;
   private cachedKey = '';
+  /** In-memory capture populated ONLY when NODE_ENV === 'test' so tests never require HTTP endpoints to return secrets. */
+  private testOutbox = new Map<string, EmailPreviewPayload>();
 
   public hasRealTransport(): boolean {
     return Boolean(config.resendApiKey) && process.env.NODE_ENV !== 'test';
@@ -121,8 +123,13 @@ class EmailService {
     this.cachedKey = '';
   }
 
-  public isDevPreviewAllowed(): boolean {
-    return process.env.NODE_ENV !== 'production' && !this.hasRealTransport();
+  public getTestPreview(email: string): EmailPreviewPayload | undefined {
+    if (process.env.NODE_ENV !== 'test') return undefined;
+    return this.testOutbox.get(email.trim().toLowerCase());
+  }
+
+  public clearTestOutbox(): void {
+    this.testOutbox.clear();
   }
 
   public getPortalBaseUrl(portal: AuthPortal): string {
@@ -248,39 +255,40 @@ class EmailService {
   }
 
   private async dispatch(payload: BaseMailPayload): Promise<EmailSendResult> {
-    let fallbackWarning: string | undefined;
-
     if (this.hasRealTransport()) {
       const client = this.getClient();
-      if (client) {
-        try {
-          const { data, error } = await client.emails.send({
-            from: normalizeFromAddress(config.resendFrom),
-            to: [payload.to],
-            subject: payload.subject,
-            html: payload.html,
-            text: payload.text,
-          });
-          if (!error) {
-            return { delivered: true, provider: 'resend', messageId: data?.id };
-          }
-          console.error('[EmailService] Resend dispatch error:', error.message);
-          if (process.env.NODE_ENV === 'production') {
-            return { delivered: false, provider: 'resend', error: error.message };
-          }
-          fallbackWarning = `Resend could not send live email (${error.message}). Showing local verification code for testing.`;
-        } catch (err: any) {
-          const msg = err?.message || String(err);
-          console.error('[EmailService] Resend dispatch exception:', msg);
-          if (process.env.NODE_ENV === 'production') {
-            return { delivered: false, provider: 'resend', error: msg };
-          }
-          fallbackWarning = `Resend could not send live email (${msg}). Showing local verification code for testing.`;
+      if (!client) {
+        return { delivered: false, provider: 'resend', error: 'RESEND_API_KEY is not configured.' };
+      }
+      try {
+        const { data, error } = await client.emails.send({
+          from: normalizeFromAddress(config.resendFrom),
+          to: [payload.to],
+          subject: payload.subject,
+          html: payload.html,
+          text: payload.text,
+        });
+        if (!error) {
+          return { delivered: true, provider: 'resend', messageId: data?.id };
         }
+        console.error('[EmailService] Resend dispatch error:', error.message);
+        return { delivered: false, provider: 'resend', error: error.message };
+      } catch (err: any) {
+        const msg = err?.message || String(err);
+        console.error('[EmailService] Resend dispatch exception:', msg);
+        return { delivered: false, provider: 'resend', error: msg };
       }
     }
 
-    // Development Preview Fallback (when RESEND_API_KEY is unset, NODE_ENV === 'test', or Resend domain/sandbox rejects in dev)
+    if (process.env.NODE_ENV === 'production') {
+      return { delivered: false, provider: 'resend', error: 'RESEND_API_KEY is not configured.' };
+    }
+
+    if (process.env.NODE_ENV === 'test' && payload.preview) {
+      this.testOutbox.set(payload.to.trim().toLowerCase(), payload.preview);
+    }
+
+    // Local console notice only when RESEND_API_KEY is unset (never returned in HTTP responses)
     console.log('\n================ [EmailService - Dev Preview] ================');
     console.log(`To:      ${payload.to}`);
     console.log(`Subject: ${payload.subject}`);
@@ -291,8 +299,6 @@ class EmailService {
     return {
       delivered: true,
       provider: 'dev-preview',
-      ...(fallbackWarning ? { warning: fallbackWarning } : {}),
-      preview: process.env.NODE_ENV !== 'production' ? payload.preview : undefined,
     };
   }
 

@@ -55,7 +55,7 @@ export const config = {
   resendFrom: (process.env.RESEND_FROM || 'V-TRY Studio <onboarding@resend.dev>').trim(),
 
   // Default Frontend Portal Origins (for email links)
-  marketplaceUrl: 'http://localhost:3000',
-  brandDashboardUrl: 'http://localhost:3001',
-  superAdminUrl: 'http://localhost:3002',
+  marketplaceUrl: (process.env.MARKETPLACE_URL || 'http://localhost:3000').trim(),
+  brandDashboardUrl: (process.env.BRAND_DASHBOARD_URL || 'http://localhost:3001').trim(),
+  superAdminUrl: (process.env.SUPER_ADMIN_URL || 'http://localhost:3002').trim(),
 };

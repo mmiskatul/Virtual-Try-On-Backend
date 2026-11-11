@@ -271,9 +271,7 @@ export function registerSharedAuthRoutes(
     }
 
     return {
-      message: mailResult.warning || 'Verification email sent! Check your inbox for the verification link or 6-digit code.',
-      ...(mailResult.warning ? { warning: mailResult.warning } : {}),
-      ...(mailResult.preview ? { devPreview: mailResult.preview } : {}),
+      message: 'Verification email sent! Check your inbox for the verification link or 6-digit code.',
     };
   });
 
@@ -293,7 +291,6 @@ export function registerSharedAuthRoutes(
     const portal = resolvePortal(body.portal, defaultPortal);
     const user = db.getUserByEmail(email);
 
-    let devPreview: EmailSendResult['preview'] | undefined;
     if (user) {
       if (db.countRecentAuthTokens(user.id, 'PASSWORD_RESET', 60_000) >= 3) {
         return reply.status(429).send({
@@ -302,13 +299,12 @@ export function registerSharedAuthRoutes(
         });
       }
 
-      const mailResult = await issueAuthTokenAndSendEmail({
+      await issueAuthTokenAndSendEmail({
         user,
         type: 'PASSWORD_RESET',
         portal,
         requestOrigin: extractRequestOrigin(request),
       });
-      devPreview = mailResult.preview;
 
       db.recordAuditLog({
         tenantId: user.tenantId,
@@ -323,7 +319,6 @@ export function registerSharedAuthRoutes(
 
     return {
       message: 'If an account matches that email address, password reset instructions have been sent.',
-      ...(devPreview ? { devPreview } : {}),
     };
   });
 

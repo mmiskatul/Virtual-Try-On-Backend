@@ -117,8 +117,13 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       user: sanitizePublicUser(user),
       tenant,
       emailDelivered: mailResult.delivered,
-      ...(!mailResult.delivered ? { warning: 'Account created, but the verification email could not be sent. Use "Resend verification" in a minute.' } : {}),
-      ...(mailResult.preview ? { devPreview: mailResult.preview } : {}),
+      ...(!mailResult.delivered
+        ? {
+            warning: mailResult.error
+              ? `Account created, but verification email could not be sent: ${mailResult.error}`
+              : 'Account created, but the verification email could not be sent. Use "Resend verification" in a minute.',
+          }
+        : {}),
     });
   });
 

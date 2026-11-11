@@ -2,6 +2,7 @@ import './setup_env.js';
 import { seedTestUsers } from './helpers.js';
 import { createApp } from '../src/server.js';
 import { db } from '../src/infrastructure/database.js';
+import { emailService } from '../src/infrastructure/email.service.js';
 
 const app = createApp('all');
 
@@ -63,8 +64,9 @@ async function runAuthTests() {
   const custRegBody = JSON.parse(custRegRes.body);
   assert(custRegBody.requiresEmailVerification === true, 'Customer register requires email verification');
   assert(custRegBody.user.email === 'maya.lin@example.com', 'Email normalized to lowercase');
-  assert(Boolean(custRegBody.devPreview?.otpCode), 'Dev preview includes 6-digit OTP code');
-  const firstOtp = custRegBody.devPreview.otpCode;
+  assert(custRegBody.devPreview === undefined, 'Register response must never expose verification codes');
+  const firstOtp = emailService.getTestPreview('maya.lin@example.com')?.otpCode || '';
+  assert(firstOtp.length === 6, 'Test outbox captured 6-digit OTP code');
 
   // Unverified login must be blocked with EMAIL_NOT_VERIFIED
   const unverifiedLogin = await app.inject({
@@ -83,7 +85,8 @@ async function runAuthTests() {
   });
   assert(resendRes.statusCode === 200, 'Resend verification returns 200');
   const resendBody = JSON.parse(resendRes.body);
-  const secondOtp = resendBody.devPreview?.otpCode;
+  assert(resendBody.devPreview === undefined, 'Resend response must never expose verification codes');
+  const secondOtp = emailService.getTestPreview('maya.lin@example.com')?.otpCode || '';
   assert(Boolean(secondOtp) && secondOtp.length === 6, 'Resend issues new 6-digit OTP');
 
   // Old OTP rejected
@@ -135,7 +138,8 @@ async function runAuthTests() {
   assert(brandRegRes.statusCode === 201, 'Brand registration returns 201');
   const brandRegBody = JSON.parse(brandRegRes.body);
   assert(brandRegBody.requiresEmailVerification === true, 'Brand registration requires verification');
-  const verifyActionUrl = new URL(brandRegBody.devPreview.actionUrl);
+  assert(brandRegBody.devPreview === undefined, 'Brand register response must never expose verification URLs');
+  const verifyActionUrl = new URL(emailService.getTestPreview('claire@lumieremode.com')?.actionUrl || '');
   const verifyToken = verifyActionUrl.searchParams.get('token');
   assert(Boolean(verifyToken), 'Brand verification URL contains raw token');
 
@@ -203,9 +207,10 @@ async function runAuthTests() {
   });
   assert(forgotRes.statusCode === 200, 'Forgot password returns 200 for existing brand owner');
   const forgotBody = JSON.parse(forgotRes.body);
-  const resetUrl = new URL(forgotBody.devPreview.actionUrl);
+  assert(forgotBody.devPreview === undefined, 'Forgot password response must never expose reset tokens');
+  const resetUrl = new URL(emailService.getTestPreview('claire@lumieremode.com')?.actionUrl || '');
   const resetToken = resetUrl.searchParams.get('token');
-  assert(Boolean(resetToken), 'Forgot password devPreview provides reset token');
+  assert(Boolean(resetToken), 'Forgot password test outbox captured reset token');
 
   const checkTokenRes = await app.inject({
     method: 'POST',
@@ -259,7 +264,8 @@ async function runAuthTests() {
     payload: { email: 'admin@vton-platform.io', portal: 'admin' },
   });
   assert(adminForgotRes.statusCode === 200, 'Admin forgot password returns 200');
-  const adminOtp = JSON.parse(adminForgotRes.body).devPreview?.otpCode;
+  assert(JSON.parse(adminForgotRes.body).devPreview === undefined, 'Admin forgot password must never expose OTPs');
+  const adminOtp = emailService.getTestPreview('admin@vton-platform.io')?.otpCode;
   assert(Boolean(adminOtp), 'Admin reset OTP generated');
 
   const adminResetRes = await app.inject({
