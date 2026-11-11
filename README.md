@@ -1,120 +1,57 @@
-# Virtual Try-On Unified Backend (Fastify 5)
+# Virtual Try-On Unified Enterprise Backend (Fastify 5 + Prisma)
 
-Enterprise high-performance multi-tenant backend consolidating Brand API, Marketplace API, and Super Admin API into a single unified Fastify 5 architecture.
-
----
-
-## 🏛 Architecture Overview
-
-```
-                      ┌───────────────────────────────────────────────┐
-                      │             Virtual Try-On Platform           │
-                      └──────────────────────┬────────────────────────┘
-                                             │
-      ┌──────────────────────────────────────┼──────────────────────────────────────┐
-      │                                      │                                      │
-┌─────▼───────────────┐            ┌─────────▼─────────────┐            ┌───────────▼───────────┐
-│   Brand Dashboard   │            │ Marketplace Frontend  │            │ Super Admin Dashboard │
-│   Port: 3001        │            │ Port: 3000            │            │ Port: 3002            │
-      │                                      │                                      │
-      │ :4000                                │ :4000                                │ :4000
-      ▼                                      ▼                                      ▼
-┌───────────────────────────────────────────────────────────────────────────────────────────┐
-│                                unified `backend` (Fastify 5)                              │
-│                                                                                           │
-│  • Brand Routes (Auth, Products, Fabrics, Inventory, Orders, Storefront, Uploads)         │
-│  • Marketplace Routes (Catalog, Single-Seller Checkout, Orders, Try-On Dispatch)          │
-│  • Super Admin Routes (Admin Auth, Tenant Governance, Platform Analytics, Audit Logs)     │
-│  • System Routes (/health, /live, /ready, /metrics)                                       │
-│  • Unified Gateway (Port 4000)                                                            │
-│                                                                                           │
-│  💾 Database: Neon Serverless PostgreSQL / In-Memory ACID Resilient Fallback              │
-│  ☁️ Cloudinary Storage: Dynamic image CDN for products & try-on assets                    │
-└─────────────────────────────────────────────┬─────────────────────────────────────────────┘
-                                              │ :8000
-                                              ▼
-                               ┌─────────────────────────────┐
-                               │    `ai-service` (FastAPI)   │
-                               │  VITON-HD Dense Pose + UNet │
-                               └─────────────────────────────┘
-```
+Enterprise multi-tenant SaaS backend powering **Marketplace (`:3000`)**, **Brand Dashboard (`:3001`)**, and **Super Admin Control Plane (`:3002`)**, paired with the Python **AI Inference Service (`:8000`)**, RabbitMQ (`:5672`), Redis (`:6379`), PostgreSQL/Supabase, and Private Signed Object Storage.
 
 ---
 
-## 🚀 Quick Start
+## Architecture Overview
 
-### 1. Install Dependencies
+- **Unified Fastify 5 API (`src/server.ts`) & Background Worker (`src/worker.ts`)**:
+  - Single-port multi-domain modular monolith (`PORT=4000`) with OpenAPI 3.1 docs at `/docs/json` & `/docs`.
+  - Structured Pino JSON logging + `X-Correlation-Id` end-to-end request tracing.
+  - Transactional Outbox (`outbox_events`) + idempotent event consumer (`processed_events`) for `tryon.generation.*`.
+- **PostgreSQL + Prisma 7 + RLS (`prisma/schema.prisma`, `prisma/rls_policies.sql`)**:
+  - 45+ normalized relational models covering identity/sessions, RBAC (`roles`, `permissions`, `role_permissions`, `user_role_assignments`), tenant membership & audited `ViewAsSession`, catalog/variants/moderation, `Cart`/`Order`/`PaymentRecord`/`RefundRecord`, `Plan`/`PlanEntitlement`/`InvoiceRecord`, atomic `AiCreditAccount` + `AiCreditLedger` (`FOR UPDATE`), `SupportTicket`, `CmsContent`, `FeatureFlag`, `WebhookEndpoint`, and `DataGovernanceRequest`.
+- **Identity, Dual JWT & Enterprise RBAC (`src/modules/auth/`, `src/modules/rbac/`, `src/modules/tenants/`)**:
+  - Dual verification: Fastify HS256 JWT + optional Supabase Auth JWT (`SUPABASE_JWT_SECRET` HS256 / `SUPABASE_URL` JWKS).
+  - Real-time `UserSession` tracking and immediate revocation on suspend/logout.
+  - 10 Platform Admin roles, 7 Brand roles + `STORE_MANAGER` alias + `CUSTOMER` role.
+  - Strict `tenantScopeGuard` rejecting forged `tenantId` parameters and blocking mutations on `READ_ONLY` Super Admin `View-As` sessions.
+- **Async Virtual Try-On Pipeline (`src/modules/tryon/`, `src/routes/tryon/`)**:
+  - Signed PUT upload intents (`POST /api/v1/try-on/upload-url`), idempotent async jobs (`POST /api/v1/try-on/jobs`), owner/tenant-scoped status + signed 300s download URLs (`GET /api/v1/try-on/jobs/:id`), live SSE streams (`GET /api/v1/try-on/jobs/:id/events`), queued cancellation (`POST /api/v1/try-on/jobs/:id/cancel`), and authenticated history (`GET /api/v1/try-on/jobs`).
+- **Plans, Billing & Atomic Credits (`src/modules/billing/`)**:
+  - `SELECT ... FOR UPDATE` row-locked reservations, promo-first credit priority, idempotent `CONSUME` / `RELEASE` ledger settlement, plan upgrades, and invoice generation.
+- **Super Admin Control Plane & Commerce Engagement (`src/modules/admin/`, `src/modules/commerce/`)**:
+  - Unified `/api/v1/admin/control-plane/snapshot`, moderation approvals/rejections, CMS pages, feature flags, webhooks, support tickets, multi-seller cart/reviews/favorites, and GDPR `/api/v1/account/export` & deletion governance.
+
+---
+
+## Quick Start & Commands
+
 ```bash
 cd backend
 npm install
-```
 
-### 2. Configure Environment (`.env`)
-Copy `.env.example` to `.env`:
-```bash
-# Server Port
-HOST=0.0.0.0
-PORT=4000
-
-# Security & Tokens
-JWT_SECRET=vton_unified_jwt_secret_production_ready_2026
-PASSWORD_SALT=vton_production_salt_secure_2026
-INTERNAL_SERVICE_KEY=vton_internal_service_key_enterprise
-
-# AI Service Engine (FastAPI)
-AI_SERVICE_URL=http://localhost:8000
-
-# Database Configuration (Neon Serverless PostgreSQL or local Postgres)
-# Leave blank to run on automatic in-memory ACID store with disk snapshotting
-DATABASE_URL=
-
-# Cloudinary Image Storage
-CLOUDINARY_URL=
-CLOUDINARY_CLOUD_NAME=
-CLOUDINARY_API_KEY=
-CLOUDINARY_API_SECRET=
-CLOUDINARY_FOLDER=virtual-try-on
-```
-
-### 3. Prisma ORM Commands
-```bash
-# Validate Prisma schema
-npm run prisma:validate
-
-# Generate Prisma Client
-npm run prisma:generate
-
-# Push schema directly to database
+# Validate Prisma schema & push to PostgreSQL
+npx prisma validate
+npx prisma generate
 npm run prisma:push
 
-# Run Prisma migrations
-npm run prisma:migrate
-
-# Open Prisma Studio GUI
-npm run prisma:studio
-
-# Run Prisma verification test suite
-npm run test:prisma
-```
-
-### 4. Run Development Server
-```bash
-npm run dev
-```
-Starts Fastify 5 listening on single unified port:
-- `http://localhost:4000` -> Consolidated Backend (Brand API, Marketplace API, Super Admin API, System/Health)
-
-### 5. Run Test Suite
-```bash
-# Main 30-case integration test suite
-npm test
-
-# Prisma ORM integration test suite (48 checks)
-npm run test:prisma
-```
-
-### 6. Build for Production
-```bash
+# Build TypeScript + run Vitest enterprise suite (Phases 1-7)
 npm run build
-npm start
+npm run test:unit
+
+# Start API server (:4000) and RabbitMQ/Outbox background worker
+npm run dev
+npm run worker
+```
+
+---
+
+## Root Infrastructure (`docker-compose.yml`)
+
+From the repository root:
+
+```bash
+docker compose up -d rabbitmq redis
 ```

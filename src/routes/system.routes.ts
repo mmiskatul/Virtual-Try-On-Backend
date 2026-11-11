@@ -5,6 +5,9 @@ import { db } from '../infrastructure/database.js';
 import { cloudinaryStorage } from '../infrastructure/cloudinary_storage.js';
 import { observability } from '../infrastructure/observability.js';
 import { config } from '../infrastructure/config.js';
+import { redisAdapter } from '../infrastructure/redis.js';
+import { rabbitMqBus } from '../infrastructure/rabbitmq.js';
+import { storageAdapter } from '../infrastructure/storage.adapter.js';
 
 const startedAt = Date.now();
 let appVersion = '2.0.0';
@@ -54,6 +57,10 @@ export async function systemRoutes(app: FastifyInstance) {
   app.get('/health', async () => {
     const isPrisma = db.isPrismaActive();
     const isDbSql = db.isNeonSqlActive();
+    const [redisHealth, storageHealth] = await Promise.all([
+      redisAdapter.health(),
+      storageAdapter.health(),
+    ]);
     return {
       status: 'UP',
       service: 'virtual-try-on-unified-backend',
@@ -64,7 +71,10 @@ export async function systemRoutes(app: FastifyInstance) {
         ? 'Neon PostgreSQL SQL Database'
         : 'Resilient In-Memory & File Snapshot',
       prismaActive: isPrisma,
-      cloudinaryConfigured: cloudinaryStorage.isConfigured()
+      cloudinaryConfigured: cloudinaryStorage.isConfigured(),
+      redis: redisHealth,
+      rabbitmq: { connected: rabbitMqBus.isConnected() },
+      storage: storageHealth,
     };
   });
 

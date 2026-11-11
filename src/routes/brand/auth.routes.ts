@@ -2,6 +2,9 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken } from '../../infrastructure/auth.guard.js';
 import { Tenant } from '../../domain/types.js';
+import { createUserSession } from '../../modules/auth/jwt.verifier.js';
+import { recordAudit } from '../../modules/audit/audit.service.js';
+import { BRAND_MEMBER_ROLE_CODES } from '../../modules/rbac/rbac.catalog.js';
 import {
   dispatchVerificationForUser,
   extractRequestOrigin,
@@ -135,7 +138,7 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid email or password' });
     }
 
-    if (user.role !== 'BRAND_OWNER' && user.role !== 'STORE_MANAGER') {
+    if (!BRAND_MEMBER_ROLE_CODES.has(user.role)) {
       return reply.status(403).send({
         error: 'Forbidden',
         message: 'Access restricted to Brand Merchant accounts. Please use the appropriate portal.',
@@ -166,11 +169,29 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       db.updateUser(user.id, { passwordHash: db.hashPassword(password) });
     }
 
-    const token = app.jwt.sign({ userId: user.id, role: user.role, tenantId: user.tenantId });
+    const session = await createUserSession({
+      userId: user.id,
+      deviceLabel: (request.headers['user-agent'] as string) || 'Brand Dashboard',
+      ipAddress: request.ip,
+    });
+    const token = app.jwt.sign({ userId: user.id, role: user.role, tenantId: user.tenantId, sid: session.id });
+
+    await recordAudit({
+      actorId: user.id,
+      actorRole: user.role,
+      tenantId: user.tenantId,
+      action: 'BRAND_LOGIN',
+      entity: 'User',
+      entityId: user.id,
+      correlationId: request.correlationId,
+      ipAddress: request.ip,
+      details: { sessionId: session.id },
+    });
 
     return {
       message: 'Login successful',
       token,
+      sessionId: session.id,
       user: sanitizePublicUser(user),
       tenant,
     };

@@ -1,21 +1,25 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
+import { tenantScopeGuard } from '../../modules/tenants/tenant.scope.js';
 import { Product, ProductVariant } from '../../domain/types.js';
 import { idempotencyManager } from '../../infrastructure/idempotency.js';
+import { catalogRepository } from '../../modules/catalog/catalog.repository.js';
 
-const brandGuards = [authenticateToken, requireRole('BRAND_OWNER', 'STORE_MANAGER')];
+const brandReadGuards = [authenticateToken, tenantScopeGuard, requirePermission('brand:products', 'read')];
+const brandWriteGuards = [authenticateToken, tenantScopeGuard, requirePermission('brand:products', 'write')];
 
 export async function brandProductRoutes(app: FastifyInstance) {
   // List Products
-  app.get('/api/v1/products', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/v1/products', { preHandler: brandReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const products = db.getProductsByTenant(request.tenant.id);
     return { products };
   });
 
   // Create Product
-  app.post('/api/v1/products', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/products', { preHandler: brandWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const body = request.body as any;
     const { name, category, price, sku, variants, isTryOnEligible, tryOnCategory } = body || {};
@@ -102,6 +106,7 @@ export async function brandProductRoutes(app: FastifyInstance) {
       const created = await db.runTransaction(async () => {
         return db.createProduct(product);
       });
+      await catalogRepository.syncProductRelations(created);
 
       const responsePayload = { message: 'Product created successfully', product: created };
 
@@ -119,7 +124,7 @@ export async function brandProductRoutes(app: FastifyInstance) {
   });
 
   // Get Product by ID
-  app.get('/api/v1/products/:id', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/v1/products/:id', { preHandler: brandReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const { id } = request.params as { id: string };
     const product = db.getProductById(id, request.tenant.id);
@@ -130,7 +135,7 @@ export async function brandProductRoutes(app: FastifyInstance) {
   });
 
   // Update Product (whitelist mutable fields to prevent tenantId/id mass assignment)
-  app.put('/api/v1/products/:id', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.put('/api/v1/products/:id', { preHandler: brandWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const { id } = request.params as { id: string };
     const body = (request.body as Partial<Product>) || {};
@@ -157,40 +162,49 @@ export async function brandProductRoutes(app: FastifyInstance) {
     if (!updated) {
       return reply.status(404).send({ error: 'NotFound', message: 'Product not found in your tenant catalog.' });
     }
+    await catalogRepository.syncProductRelations(updated);
     return { message: 'Product updated successfully', product: updated };
   });
 
-  // Publication State Toggle
-  app.patch('/api/v1/products/:id/publish', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  // Publication State Toggle (enforces moderation blocks)
+  app.patch('/api/v1/products/:id/publish', { preHandler: brandWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const { id } = request.params as { id: string };
     const body = (request.body as any) || {};
 
-    const product = db.getProductById(id, request.tenant.id);
-    if (!product) {
-      return reply.status(404).send({ error: 'NotFound', message: 'Product not found.' });
-    }
-
-    const updates: Partial<Product> = {};
+    let brandStorefrontPublished: boolean | undefined;
+    let marketplacePublished: boolean | undefined;
     if (body.channel && typeof body.published === 'boolean') {
-      if (body.channel === 'brandStorefrontPublished') updates.brandStorefrontPublished = body.published;
-      if (body.channel === 'marketplacePublished') updates.marketplacePublished = body.published;
+      if (body.channel === 'brandStorefrontPublished') brandStorefrontPublished = body.published;
+      if (body.channel === 'marketplacePublished') marketplacePublished = body.published;
     } else {
-      if (typeof body.brandStorefrontPublished === 'boolean') updates.brandStorefrontPublished = body.brandStorefrontPublished;
-      if (typeof body.marketplacePublished === 'boolean') updates.marketplacePublished = body.marketplacePublished;
+      if (typeof body.brandStorefrontPublished === 'boolean') brandStorefrontPublished = body.brandStorefrontPublished;
+      if (typeof body.marketplacePublished === 'boolean') marketplacePublished = body.marketplacePublished;
     }
 
-    const updated = db.updateProduct(id, request.tenant.id, updates);
+    const result = await catalogRepository.setPublicationState({
+      productId: id,
+      tenantId: request.tenant.id,
+      brandStorefrontPublished,
+      marketplacePublished,
+    });
+
+    if (!result.ok) {
+      const status = result.code === 'ModerationBlocked' ? 403 : 404;
+      return reply.status(status).send({ error: result.code, message: result.message });
+    }
+
     return {
       message: 'Product publication state updated successfully',
-      product: updated,
-      brandStorefrontPublished: updated?.brandStorefrontPublished,
-      marketplacePublished: updated?.marketplacePublished
+      product: result.product,
+      publication: result.publication,
+      brandStorefrontPublished: result.product.brandStorefrontPublished,
+      marketplacePublished: result.product.marketplacePublished,
     };
   });
 
   // Delete Product
-  app.delete('/api/v1/products/:id', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.delete('/api/v1/products/:id', { preHandler: brandWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const { id } = request.params as { id: string };
     const deleted = db.deleteProduct(id, request.tenant.id);

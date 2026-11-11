@@ -2,6 +2,8 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken } from '../../infrastructure/auth.guard.js';
 import { User } from '../../domain/types.js';
+import { createUserSession } from '../../modules/auth/jwt.verifier.js';
+import { recordAudit } from '../../modules/audit/audit.service.js';
 import {
   dispatchVerificationForUser,
   extractRequestOrigin,
@@ -124,10 +126,28 @@ export async function customerAuthRoutes(app: FastifyInstance) {
       db.updateUser(user.id, { passwordHash: db.hashPassword(password) });
     }
 
-    const token = app.jwt.sign({ userId: user.id, role: user.role, email: user.email });
+    const session = await createUserSession({
+      userId: user.id,
+      deviceLabel: (request.headers['user-agent'] as string) || 'Marketplace Web',
+      ipAddress: request.ip,
+    });
+    const token = app.jwt.sign({ userId: user.id, role: user.role, email: user.email, sid: session.id });
+
+    await recordAudit({
+      actorId: user.id,
+      actorRole: user.role,
+      action: 'CUSTOMER_LOGIN',
+      entity: 'User',
+      entityId: user.id,
+      correlationId: request.correlationId,
+      ipAddress: request.ip,
+      details: { sessionId: session.id },
+    });
+
     return {
       message: 'Login successful',
       token,
+      sessionId: session.id,
       user: sanitizePublicUser(user),
     };
   });

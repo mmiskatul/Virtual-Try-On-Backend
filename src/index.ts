@@ -1,11 +1,22 @@
 import { createApp } from './server.js';
 import { config } from './infrastructure/config.js';
 import { db } from './infrastructure/database.js';
+import { getValidatedEnv } from './infrastructure/env.schema.js';
+import { redisAdapter } from './infrastructure/redis.js';
+import { rabbitMqBus } from './infrastructure/rabbitmq.js';
+import { outboxRelayWorker } from './infrastructure/outbox.js';
 
 async function bootstrap() {
+  const env = getValidatedEnv();
   console.log('\n=============================================================');
   console.log('🚀 Virtual Try-On SaaS — Unified Fastify 5 Backend Starting...');
   console.log('=============================================================\n');
+
+  await redisAdapter.connect(env.REDIS_URL);
+  await rabbitMqBus.connect(env.RABBITMQ_URL);
+  if (rabbitMqBus.isConnected()) {
+    outboxRelayWorker.start(2000);
+  }
 
   const app = createApp('all');
 
@@ -32,7 +43,10 @@ async function bootstrap() {
 
   const handleShutdown = async (signal: string) => {
     console.log(`\n[${signal}] Gracefully closing Fastify server instance...`);
+    outboxRelayWorker.stop();
     await app.close();
+    await rabbitMqBus.close();
+    await redisAdapter.disconnect();
     db.save();
     console.log('✅ Backend server closed cleanly.');
     process.exit(0);

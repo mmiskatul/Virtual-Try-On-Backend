@@ -1,6 +1,9 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import { createUserSession } from '../../modules/auth/jwt.verifier.js';
+import { recordAudit } from '../../modules/audit/audit.service.js';
+import { PLATFORM_ADMIN_ROLE_CODES } from '../../modules/rbac/rbac.catalog.js';
 import {
   normalizeEmail,
   registerSharedAuthRoutes,
@@ -24,7 +27,7 @@ export async function adminAuthRoutes(app: FastifyInstance) {
       return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid super-admin credentials.' });
     }
 
-    if (user.role !== 'SUPER_ADMIN') {
+    if (!PLATFORM_ADMIN_ROLE_CODES.has(user.role)) {
       return reply.status(403).send({ error: 'Forbidden', message: 'Access restricted to Platform Super Admins only.' });
     }
 
@@ -41,19 +44,27 @@ export async function adminAuthRoutes(app: FastifyInstance) {
       db.updateUser(user.id, { passwordHash: db.hashPassword(password) });
     }
 
-    const token = app.jwt.sign({ userId: user.id, role: user.role });
+    const session = await createUserSession({
+      userId: user.id,
+      deviceLabel: (request.headers['user-agent'] as string) || 'Admin Console',
+      ipAddress: request.ip,
+    });
+    const token = app.jwt.sign({ userId: user.id, role: user.role, sid: session.id });
 
-    db.recordAuditLog({
+    await recordAudit({
       actorId: user.id,
       actorRole: user.role,
       action: 'ADMIN_LOGIN',
       entity: 'Platform',
-      details: { email: user.email },
+      correlationId: request.correlationId,
+      ipAddress: request.ip,
+      details: { email: user.email, sessionId: session.id },
     });
 
     return {
       message: 'Super Admin authentication successful',
       token,
+      sessionId: session.id,
       admin: sanitizePublicUser(user),
     };
   });
