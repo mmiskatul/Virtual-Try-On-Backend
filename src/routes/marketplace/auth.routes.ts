@@ -4,11 +4,16 @@ import { db } from '../../infrastructure/database.js';
 import { authenticateToken } from '../../infrastructure/auth.guard.js';
 import { getValidatedEnv } from '../../infrastructure/env.schema.js';
 import { User } from '../../domain/types.js';
-import { createUserSession } from '../../modules/auth/jwt.verifier.js';
+import {
+  consumeOAuthExchangeCode,
+  createOAuthExchangeCode,
+  resolveUserFromClaims,
+} from '../../modules/auth/jwt.verifier.js';
 import { recordAudit } from '../../modules/audit/audit.service.js';
 import {
   dispatchVerificationForUser,
   extractRequestOrigin,
+  issuePortalAuthSession,
   isValidEmail,
   normalizeEmail,
   registerSharedAuthRoutes,
@@ -107,13 +112,58 @@ export async function customerAuthRoutes(app: FastifyInstance) {
       user = db.updateUser(user.id, { emailVerified: true, emailVerifiedAt: Date.now() }) || user;
     }
 
-    const session = await createUserSession({
+    const issued = await issuePortalAuthSession(
+      request,
+      reply,
+      'marketplace',
+      user,
+      (request.headers['user-agent'] as string) || 'Google OAuth Web',
+    );
+    const oauthExchangeCode = await createOAuthExchangeCode({
       userId: user.id,
-      deviceLabel: 'Google OAuth Web',
+      portal: 'marketplace',
+      deviceLabel: (request.headers['user-agent'] as string) || 'Google OAuth Web',
       ipAddress: request.ip,
     });
-    const token = app.jwt.sign({ userId: user.id, role: user.role, email: user.email, sid: session.id });
-    return { token, sessionId: session.id, user: sanitizePublicUser(user) };
+    return {
+      ...issued.responseFields,
+      oauthExchangeCode,
+      user: sanitizePublicUser(user),
+    };
+  });
+
+  // One-time cookie handoff endpoint used by NextAuth /api/auth/cookie-handoff to mint HttpOnly cookies on the browser
+  app.post('/api/v1/marketplace/auth/oauth-exchange', async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = (request.body as any) || {};
+    const code = typeof body.code === 'string' ? body.code.trim() : '';
+    if (!code) {
+      return reply.status(400).send({ error: 'ValidationError', message: 'Exchange code is required.' });
+    }
+
+    const claimed = await consumeOAuthExchangeCode(code);
+    if (!claimed || claimed.portal !== 'marketplace') {
+      return reply.status(401).send({ error: 'InvalidExchangeCode', message: 'OAuth handoff code is invalid or expired.' });
+    }
+
+    const user = await resolveUserFromClaims({ userId: claimed.userId, authSource: 'fastify_jwt' });
+    if (!user || user.role !== 'CUSTOMER') {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Customer account not found.' });
+    }
+
+    const issued = await issuePortalAuthSession(
+      request,
+      reply,
+      'marketplace',
+      user,
+      claimed.deviceLabel || (request.headers['user-agent'] as string) || 'Google OAuth Web',
+    );
+
+    return {
+      ok: true,
+      sessionId: issued.session.id,
+      session: issued.responseFields.session,
+      user: sanitizePublicUser(user),
+    };
   });
 
   // Customer Registration (with Email Verification)
@@ -235,12 +285,13 @@ export async function customerAuthRoutes(app: FastifyInstance) {
       db.updateUser(user.id, { passwordHash: db.hashPassword(password) });
     }
 
-    const session = await createUserSession({
-      userId: user.id,
-      deviceLabel: (request.headers['user-agent'] as string) || 'Marketplace Web',
-      ipAddress: request.ip,
-    });
-    const token = app.jwt.sign({ userId: user.id, role: user.role, email: user.email, sid: session.id });
+    const issued = await issuePortalAuthSession(
+      request,
+      reply,
+      'marketplace',
+      user,
+      (request.headers['user-agent'] as string) || 'Marketplace Web',
+    );
 
     await recordAudit({
       actorId: user.id,
@@ -250,13 +301,12 @@ export async function customerAuthRoutes(app: FastifyInstance) {
       entityId: user.id,
       correlationId: request.correlationId,
       ipAddress: request.ip,
-      details: { sessionId: session.id },
+      details: { sessionId: issued.session.id },
     });
 
     return {
       message: 'Login successful',
-      token,
-      sessionId: session.id,
+      ...issued.responseFields,
       user: sanitizePublicUser(user),
     };
   });

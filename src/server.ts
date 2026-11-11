@@ -63,6 +63,8 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
       'x-try-on-token',
       'X-View-As-Session',
       'X-Correlation-Id',
+      'X-Auth-Portal',
+      'X-Auth-Transport',
     ]
   });
 

@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
+import { resolveOptionalAuthUser } from '../../infrastructure/auth.guard.js';
 import { Order, OrderItem } from '../../domain/types.js';
 
 interface CheckoutItemInput {
@@ -193,17 +194,9 @@ export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
       });
     }
 
-    // Optional customer association if a valid Bearer JWT is sent
-    let customerId: string | undefined;
-    const authHeader = request.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      try {
-        const decoded = request.server.jwt.verify<any>(authHeader.substring(7));
-        if (decoded?.userId) customerId = decoded.userId;
-      } catch {
-        // Guest checkout allowed if token absent/expired
-      }
-    }
+    // Optional customer association if a valid HttpOnly cookie or Bearer JWT is present
+    const { user: optionalUser } = await resolveOptionalAuthUser(request);
+    const customerId = optionalUser?.id;
 
     try {
       const order = await db.runTransaction(() => {

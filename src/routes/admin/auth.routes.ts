@@ -1,10 +1,10 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
-import { createUserSession } from '../../modules/auth/jwt.verifier.js';
 import { recordAudit } from '../../modules/audit/audit.service.js';
 import { PLATFORM_ADMIN_ROLE_CODES } from '../../modules/rbac/rbac.catalog.js';
 import {
+  issuePortalAuthSession,
   normalizeEmail,
   registerSharedAuthRoutes,
   sanitizePublicUser,
@@ -44,12 +44,13 @@ export async function adminAuthRoutes(app: FastifyInstance) {
       db.updateUser(user.id, { passwordHash: db.hashPassword(password) });
     }
 
-    const session = await createUserSession({
-      userId: user.id,
-      deviceLabel: (request.headers['user-agent'] as string) || 'Admin Console',
-      ipAddress: request.ip,
-    });
-    const token = app.jwt.sign({ userId: user.id, role: user.role, sid: session.id });
+    const issued = await issuePortalAuthSession(
+      request,
+      reply,
+      'admin',
+      user,
+      (request.headers['user-agent'] as string) || 'Admin Console',
+    );
 
     await recordAudit({
       actorId: user.id,
@@ -58,13 +59,12 @@ export async function adminAuthRoutes(app: FastifyInstance) {
       entity: 'Platform',
       correlationId: request.correlationId,
       ipAddress: request.ip,
-      details: { email: user.email, sessionId: session.id },
+      details: { email: user.email, sessionId: issued.session.id },
     });
 
     return {
       message: 'Super Admin authentication successful',
-      token,
-      sessionId: session.id,
+      ...issued.responseFields,
       admin: sanitizePublicUser(user),
     };
   });

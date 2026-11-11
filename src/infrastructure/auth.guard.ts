@@ -3,6 +3,7 @@ import { db } from './database.js';
 import { getGlobalPrisma } from './prisma.js';
 import { User, Tenant, UserRole } from '../domain/types.js';
 import { isSessionRevoked, resolveUserFromClaims, verifyDualJwt } from '../modules/auth/jwt.verifier.js';
+import { extractCookieToken } from './auth_cookies.js';
 import { PLATFORM_ADMIN_ROLE_CODES, resolvePermissionsForRoles } from '../modules/rbac/rbac.catalog.js';
 import { ActiveViewAsSession, getActiveViewAsSession } from '../modules/tenants/tenant.scope.js';
 
@@ -18,14 +19,55 @@ declare module 'fastify' {
   }
 }
 
+export function extractAccessTokenFromRequest(request: FastifyRequest): string | null {
+  const authHeader = request.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const candidate = authHeader.substring(7).trim();
+    if (candidate && candidate !== 'undefined' && candidate !== 'null') {
+      return candidate;
+    }
+  }
+  const { token } = extractCookieToken(request, 'access');
+  return token;
+}
+
+export async function resolveOptionalAuthUser(request: FastifyRequest): Promise<{
+  user?: User;
+  sid?: string;
+}> {
+  const token = extractAccessTokenFromRequest(request);
+  if (!token) return {};
+  try {
+    const claims = await verifyDualJwt(request, token);
+    if (claims.sid && (await isSessionRevoked(claims.sid))) {
+      return {};
+    }
+    const user = await resolveUserFromClaims(claims);
+    if (!user) return {};
+    return { user, sid: claims.sid };
+  } catch {
+    return {};
+  }
+}
+
 export async function authenticateToken(request: FastifyRequest, reply: FastifyReply) {
   try {
-    const authHeader = request.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return reply.status(401).send({ error: 'Unauthorized', message: 'Missing or malformed Authorization header.' });
+    const token = extractAccessTokenFromRequest(request);
+    if (!token) {
+      const hasRefreshCookie = Boolean(extractCookieToken(request, 'refresh').token);
+      if (hasRefreshCookie) {
+        return reply.status(401).send({
+          error: 'TokenExpired',
+          code: 'TOKEN_EXPIRED',
+          message: 'Access token expired or missing. Refresh required.',
+        });
+      }
+      return reply.status(401).send({
+        error: 'Unauthorized',
+        message: 'Missing or malformed Authorization header or auth cookie.',
+      });
     }
 
-    const token = authHeader.substring(7);
     const claims = await verifyDualJwt(request, token);
 
     if (claims.sid && (await isSessionRevoked(claims.sid))) {
@@ -117,6 +159,14 @@ export async function authenticateToken(request: FastifyRequest, reply: FastifyR
       request.tenant = tenant;
     }
   } catch (err: any) {
+    if (err?.code === 'TOKEN_EXPIRED') {
+      return reply.status(401).send({
+        error: 'TokenExpired',
+        code: 'TOKEN_EXPIRED',
+        message: 'Access token expired.',
+        details: err.message,
+      });
+    }
     return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid or expired token.', details: err.message });
   }
 }

@@ -3,7 +3,18 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { AuthPortal, AuthToken, AuthTokenType, User } from '../../domain/types.js';
 import { db } from '../../infrastructure/database.js';
 import { emailService, EmailSendResult } from '../../infrastructure/email.service.js';
-import { createUserSession } from '../../modules/auth/jwt.verifier.js';
+import { resolveOptionalAuthUser } from '../../infrastructure/auth.guard.js';
+import {
+  clearPortalAuthCookies,
+  extractCookieToken,
+  setPortalAuthCookies,
+  wantsCookieOnlyTransport,
+} from '../../infrastructure/auth_cookies.js';
+import {
+  issueSessionTokens,
+  revokeUserSession,
+  rotateRefreshSession,
+} from '../../modules/auth/jwt.verifier.js';
 
 const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 const PASSWORD_RESET_TTL_MS = 30 * 60 * 1000; // 30 minutes
@@ -38,6 +49,40 @@ export function sanitizePublicUser(user: User) {
     role: user.role,
     tenantId: user.tenantId,
     emailVerified: Boolean(user.emailVerified),
+  };
+}
+
+export async function issuePortalAuthSession(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  portal: AuthPortal,
+  user: User,
+  deviceLabel?: string,
+) {
+  const issued = await issueSessionTokens(request, user, { portal, deviceLabel });
+  setPortalAuthCookies(reply, request, portal, {
+    accessToken: issued.accessToken,
+    refreshToken: issued.refreshToken,
+    sessionId: issued.session.id,
+    refreshTtlSec: issued.refreshTtlSec,
+  });
+
+  const cookieOnly = wantsCookieOnlyTransport(request);
+  return {
+    accessToken: issued.accessToken,
+    refreshToken: issued.refreshToken,
+    session: issued.session,
+    accessExpiresAt: issued.accessExpiresAt,
+    responseFields: {
+      ...(cookieOnly ? {} : { token: issued.accessToken }),
+      sessionId: issued.session.id,
+      session: {
+        id: issued.session.id,
+        portal,
+        expiresAt: issued.session.expiresAt.toISOString(),
+        accessExpiresAt: issued.accessExpiresAt.toISOString(),
+      },
+    },
   };
 }
 
@@ -204,22 +249,22 @@ export function registerSharedAuthRoutes(
       details: { email: user.email, portal: tokenRecord.portal },
     });
 
-    let authToken: string | undefined;
-    let sessionId: string | undefined;
+    let extraSessionFields: Record<string, unknown> = {};
     if (defaultPortal === 'marketplace' && user.role === 'CUSTOMER') {
-      const session = await createUserSession({
-        userId: user.id,
-        deviceLabel: (request.headers['user-agent'] as string) || 'Marketplace Verified',
-        ipAddress: request.ip,
-      });
-      sessionId = session.id;
-      authToken = app.jwt.sign({ userId: user.id, role: user.role, email: user.email, sid: session.id });
+      const issued = await issuePortalAuthSession(
+        request,
+        reply,
+        'marketplace',
+        updatedUser || user,
+        (request.headers['user-agent'] as string) || 'Marketplace Verified',
+      );
+      extraSessionFields = issued.responseFields;
     }
 
     return {
       message: 'Email verified successfully! You can now sign in to your account.',
       user: sanitizePublicUser(updatedUser || user),
-      ...(authToken ? { token: authToken, sessionId } : {}),
+      ...extraSessionFields,
     };
   });
 
@@ -438,6 +483,175 @@ export function registerSharedAuthRoutes(
 
     return {
       message: 'Your password has been reset successfully. You can now sign in with your new password.',
+    };
+  });
+
+  // Rotate Refresh Token + issue fresh HttpOnly Access & Refresh cookies
+  app.post(`${prefix}/refresh`, async (request: FastifyRequest, reply: FastifyReply) => {
+    const { token: refreshToken } = extractCookieToken(request, 'refresh', defaultPortal);
+    if (!refreshToken) {
+      clearPortalAuthCookies(reply, request, defaultPortal);
+      return reply.status(401).send({
+        error: 'SessionExpired',
+        code: 'NO_REFRESH_TOKEN',
+        message: 'No active refresh token cookie found. Please sign in again.',
+      });
+    }
+
+    const rotated = await rotateRefreshSession(request, refreshToken, defaultPortal);
+    if (!rotated.ok) {
+      clearPortalAuthCookies(reply, request, defaultPortal);
+      const isReuse = rotated.reason === 'refresh_reuse_detected';
+      return reply.status(401).send({
+        error: isReuse ? 'SessionCompromised' : 'SessionExpired',
+        code: rotated.reason.toUpperCase(),
+        message: isReuse
+          ? 'Refresh token reuse detected. Session has been revoked for security.'
+          : 'Your session has expired or been revoked. Please sign in again.',
+      });
+    }
+
+    if (rotated.user.tenantId) {
+      const tenant = db.getTenantById(rotated.user.tenantId);
+      if (tenant && tenant.status !== 'ACTIVE') {
+        await revokeUserSession(rotated.sid);
+        clearPortalAuthCookies(reply, request, rotated.portal);
+        return reply.status(403).send({
+          error: 'TenantSuspended',
+          message: 'Your organization account is suspended.',
+        });
+      }
+    }
+
+    setPortalAuthCookies(reply, request, rotated.portal, {
+      accessToken: rotated.accessToken,
+      refreshToken: rotated.refreshToken,
+      sessionId: rotated.sid,
+      refreshTtlSec: rotated.refreshTtlSec,
+    });
+
+    const cookieOnly = wantsCookieOnlyTransport(request);
+    return {
+      ok: true,
+      ...(cookieOnly ? {} : { token: rotated.accessToken }),
+      sessionId: rotated.sid,
+      session: {
+        id: rotated.sid,
+        portal: rotated.portal,
+        expiresAt: rotated.expiresAt.toISOString(),
+        accessExpiresAt: rotated.accessExpiresAt.toISOString(),
+      },
+      user: sanitizePublicUser(rotated.user),
+    };
+  });
+
+  // Logout: revoke server session + invalidate refresh state + clear HttpOnly cookies
+  app.post(`${prefix}/logout`, async (request: FastifyRequest, reply: FastifyReply) => {
+    let sidToRevoke: string | undefined;
+    const { user, sid } = await resolveOptionalAuthUser(request);
+    if (sid) {
+      sidToRevoke = sid;
+    }
+
+    if (!sidToRevoke) {
+      const { token: refreshToken } = extractCookieToken(request, 'refresh', defaultPortal);
+      if (refreshToken) {
+        try {
+          const decoded = app.jwt.verify<Record<string, any>>(refreshToken);
+          if (typeof decoded?.sid === 'string') {
+            sidToRevoke = decoded.sid;
+          }
+        } catch {
+          // Expired or invalid refresh token; still clear cookies below
+        }
+      }
+    }
+
+    if (!sidToRevoke) {
+      const { token: sidCookie } = extractCookieToken(request, 'session', defaultPortal);
+      if (sidCookie) {
+        sidToRevoke = sidCookie;
+      }
+    }
+
+    if (sidToRevoke) {
+      await revokeUserSession(sidToRevoke);
+    }
+
+    clearPortalAuthCookies(reply, request, defaultPortal);
+
+    if (user) {
+      db.recordAuditLog({
+        tenantId: user.tenantId,
+        actorId: user.id,
+        actorRole: user.role,
+        action: 'AUTH_LOGOUT',
+        entity: 'UserSession',
+        entityId: sidToRevoke || 'cookie_clear',
+        details: { portal: defaultPortal },
+      });
+    }
+
+    return {
+      ok: true,
+      loggedOut: true,
+      message: 'Signed out cleanly.',
+    };
+  });
+
+  // Lightweight session check with silent refresh-cookie rotation (avoids 401 console errors on page load)
+  app.get(`${prefix}/session`, async (request: FastifyRequest, reply: FastifyReply) => {
+    const resolved = await resolveOptionalAuthUser(request);
+    if (resolved.user) {
+      const tenant = resolved.user.tenantId ? db.getTenantById(resolved.user.tenantId) : undefined;
+      return {
+        authenticated: true,
+        refreshed: false,
+        portal: defaultPortal,
+        sessionId: resolved.sid || null,
+        user: sanitizePublicUser(resolved.user),
+        ...(tenant ? { tenant } : {}),
+      };
+    }
+
+    const { token: refreshToken } = extractCookieToken(request, 'refresh', defaultPortal);
+    if (refreshToken) {
+      const rotated = await rotateRefreshSession(request, refreshToken, defaultPortal);
+      if (rotated.ok) {
+        const tenant = rotated.user.tenantId ? db.getTenantById(rotated.user.tenantId) : undefined;
+        if (tenant && tenant.status !== 'ACTIVE') {
+          await revokeUserSession(rotated.sid);
+          clearPortalAuthCookies(reply, request, defaultPortal);
+          return { authenticated: false, portal: defaultPortal, user: null };
+        }
+        setPortalAuthCookies(reply, request, rotated.portal, {
+          accessToken: rotated.accessToken,
+          refreshToken: rotated.refreshToken,
+          sessionId: rotated.sid,
+          refreshTtlSec: rotated.refreshTtlSec,
+        });
+        return {
+          authenticated: true,
+          refreshed: true,
+          portal: rotated.portal,
+          sessionId: rotated.sid,
+          session: {
+            id: rotated.sid,
+            portal: rotated.portal,
+            expiresAt: rotated.expiresAt.toISOString(),
+            accessExpiresAt: rotated.accessExpiresAt.toISOString(),
+          },
+          user: sanitizePublicUser(rotated.user),
+          ...(tenant ? { tenant } : {}),
+        };
+      }
+      clearPortalAuthCookies(reply, request, defaultPortal);
+    }
+
+    return {
+      authenticated: false,
+      portal: defaultPortal,
+      user: null,
     };
   });
 }

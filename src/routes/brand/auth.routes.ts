@@ -2,12 +2,12 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken } from '../../infrastructure/auth.guard.js';
 import { Tenant } from '../../domain/types.js';
-import { createUserSession } from '../../modules/auth/jwt.verifier.js';
 import { recordAudit } from '../../modules/audit/audit.service.js';
 import { BRAND_MEMBER_ROLE_CODES } from '../../modules/rbac/rbac.catalog.js';
 import {
   dispatchVerificationForUser,
   extractRequestOrigin,
+  issuePortalAuthSession,
   isValidEmail,
   normalizeEmail,
   registerSharedAuthRoutes,
@@ -178,12 +178,13 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       db.updateUser(user.id, { passwordHash: db.hashPassword(password) });
     }
 
-    const session = await createUserSession({
-      userId: user.id,
-      deviceLabel: (request.headers['user-agent'] as string) || 'Brand Dashboard',
-      ipAddress: request.ip,
-    });
-    const token = app.jwt.sign({ userId: user.id, role: user.role, tenantId: user.tenantId, sid: session.id });
+    const issued = await issuePortalAuthSession(
+      request,
+      reply,
+      'brand',
+      user,
+      (request.headers['user-agent'] as string) || 'Brand Dashboard',
+    );
 
     await recordAudit({
       actorId: user.id,
@@ -194,13 +195,12 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       entityId: user.id,
       correlationId: request.correlationId,
       ipAddress: request.ip,
-      details: { sessionId: session.id },
+      details: { sessionId: issued.session.id },
     });
 
     return {
       message: 'Login successful',
-      token,
-      sessionId: session.id,
+      ...issued.responseFields,
       user: sanitizePublicUser(user),
       tenant,
     };

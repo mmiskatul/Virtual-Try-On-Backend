@@ -1,9 +1,16 @@
 import crypto from 'node:crypto';
-import { FastifyRequest } from 'fastify';
+import { FastifyInstance, FastifyRequest } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { getGlobalPrisma } from '../../infrastructure/prisma.js';
 import { getValidatedEnv } from '../../infrastructure/env.schema.js';
 import { logger } from '../../infrastructure/logger.js';
+import { redisAdapter } from '../../infrastructure/redis.js';
+import {
+  ACCESS_TOKEN_EXPIRES_IN,
+  ACCESS_TOKEN_TTL_SEC,
+  AuthPortal,
+  REFRESH_TTL_BY_PORTAL,
+} from '../../infrastructure/auth_cookies.js';
 import { User, UserRole } from '../../domain/types.js';
 import { maskIpAddress } from '../audit/audit.service.js';
 
@@ -127,12 +134,15 @@ export async function verifySupabaseJwt(token: string): Promise<VerifiedJwtClaim
 }
 
 /**
- * Dual JWT verifier: accepts Fastify-issued HMAC JWT or configured Supabase Auth JWT.
+ * Dual JWT verifier: accepts Fastify-issued HMAC access JWT or configured Supabase Auth JWT.
  */
 export async function verifyDualJwt(request: FastifyRequest, token: string): Promise<VerifiedJwtClaims> {
+  let explicitError: Error | null = null;
   try {
     const decoded = request.server.jwt.verify<Record<string, any>>(token);
-    if (decoded && (decoded.userId || decoded.sub)) {
+    if (decoded?.tokenType === 'refresh') {
+      explicitError = new Error('Refresh token cannot be used as access token');
+    } else if (decoded && (decoded.userId || decoded.sub)) {
       return {
         userId: typeof decoded.userId === 'string' ? decoded.userId : decoded.sub,
         sub: typeof decoded.sub === 'string' ? decoded.sub : undefined,
@@ -143,8 +153,15 @@ export async function verifyDualJwt(request: FastifyRequest, token: string): Pro
         authSource: 'fastify_jwt',
       };
     }
-  } catch {
-    // Fall through to optional Supabase Auth JWT verification
+  } catch (err: any) {
+    if (err?.code === 'FAST_JWT_EXPIRED' || err?.name === 'TokenExpiredError' || /expired/i.test(String(err?.message || ''))) {
+      explicitError = Object.assign(new Error('Access token expired'), { code: 'TOKEN_EXPIRED' });
+    }
+    // Fall through to optional Supabase Auth JWT verification unless it was an expired/rejected HMAC token
+  }
+
+  if (explicitError) {
+    throw explicitError;
   }
 
   const supabaseClaims = await verifySupabaseJwt(token);
@@ -162,6 +179,26 @@ export async function resolveUserFromClaims(claims: VerifiedJwtClaims): Promise<
   if (claims.userId) {
     const direct = db.getUserById(claims.userId);
     if (direct) return direct;
+    const prisma = getGlobalPrisma();
+    if (prisma) {
+      try {
+        const row = await prisma.user.findUnique({ where: { id: claims.userId } });
+        if (row) {
+          return {
+            id: row.id,
+            tenantId: row.tenantId ?? undefined,
+            name: row.name,
+            email: row.email,
+            passwordHash: row.passwordHash,
+            role: row.role as UserRole,
+            emailVerified: row.emailVerified,
+            createdAt: Number(row.createdAt),
+          };
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'auth.user_lookup_failed');
+      }
+    }
   }
 
   const prisma = getGlobalPrisma();
@@ -246,6 +283,16 @@ export async function isSessionRevoked(sessionId?: string): Promise<boolean> {
   if (!sessionId) return false;
   if (revokedSessionIds.has(sessionId)) return true;
 
+  try {
+    const redisRevoked = await redisAdapter.get(`auth:session:revoked:${sessionId}`);
+    if (redisRevoked === '1') {
+      revokedSessionIds.add(sessionId);
+      return true;
+    }
+  } catch {
+    // Non-fatal
+  }
+
   const mem = memorySessions.get(sessionId);
   if (mem) {
     if (mem.revokedAt) return true;
@@ -281,6 +328,13 @@ export async function revokeUserSession(sessionId: string): Promise<boolean> {
     mem.revokedAt = now;
   }
 
+  try {
+    await redisAdapter.del(refreshStateKey(sessionId));
+    await redisAdapter.set(`auth:session:revoked:${sessionId}`, '1', 7 * 24 * 60 * 60);
+  } catch {
+    // Non-fatal
+  }
+
   const prisma = getGlobalPrisma();
   if (prisma) {
     try {
@@ -298,10 +352,12 @@ export async function revokeUserSession(sessionId: string): Promise<boolean> {
 export async function revokeAllUserSessions(userId: string): Promise<number> {
   const now = new Date();
   let count = 0;
+  const sidsToInvalidate = new Set<string>();
   for (const [sid, s] of memorySessions.entries()) {
     if (s.userId === userId && !s.revokedAt) {
       s.revokedAt = now;
       revokedSessionIds.add(sid);
+      sidsToInvalidate.add(sid);
       count++;
     }
   }
@@ -309,6 +365,14 @@ export async function revokeAllUserSessions(userId: string): Promise<number> {
   const prisma = getGlobalPrisma();
   if (prisma) {
     try {
+      const activeRows = await prisma.userSession.findMany({
+        where: { userId, revokedAt: null },
+        select: { id: true },
+      });
+      for (const r of activeRows) {
+        revokedSessionIds.add(r.id);
+        sidsToInvalidate.add(r.id);
+      }
       const res = await prisma.userSession.updateMany({
         where: { userId, revokedAt: null },
         data: { revokedAt: now },
@@ -316,6 +380,15 @@ export async function revokeAllUserSessions(userId: string): Promise<number> {
       count = Math.max(count, res.count);
     } catch (err: any) {
       logger.warn({ err: err?.message }, 'auth.revoke_all_warning');
+    }
+  }
+
+  for (const sid of sidsToInvalidate) {
+    try {
+      await redisAdapter.del(refreshStateKey(sid));
+      await redisAdapter.set(`auth:session:revoked:${sid}`, '1', 7 * 24 * 60 * 60);
+    } catch {
+      // Non-fatal
     }
   }
   return count;
@@ -349,4 +422,259 @@ export async function listUserSessions(userId: string): Promise<SessionRecord[]>
   return Array.from(memorySessions.values())
     .filter((s) => s.userId === userId)
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+}
+
+interface RefreshTokenState {
+  jti: string;
+  userId: string;
+  role: string;
+  tenantId?: string;
+  portal: AuthPortal;
+  expiresAtMs: number;
+}
+
+function refreshStateKey(sid: string): string {
+  return `auth:refresh:sid:${sid}`;
+}
+
+function usedRefreshKey(jti: string): string {
+  return `auth:refresh:used:${jti}`;
+}
+
+export function signAccessToken(
+  app: FastifyInstance,
+  user: { id: string; tenantId?: string; role: string },
+  sid: string,
+): string {
+  return app.jwt.sign(
+    {
+      userId: user.id,
+      tenantId: user.tenantId,
+      role: user.role,
+      sid,
+      tokenType: 'access',
+    },
+    { expiresIn: ACCESS_TOKEN_EXPIRES_IN },
+  );
+}
+
+export function signRefreshToken(
+  app: FastifyInstance,
+  params: { userId: string; sid: string; jti: string; portal: AuthPortal; ttlSec: number },
+): string {
+  return app.jwt.sign(
+    {
+      userId: params.userId,
+      sid: params.sid,
+      jti: params.jti,
+      portal: params.portal,
+      tokenType: 'refresh',
+    },
+    { expiresIn: `${params.ttlSec}s` },
+  );
+}
+
+export async function issueSessionTokens(
+  request: FastifyRequest,
+  user: User,
+  options: { portal: AuthPortal; deviceLabel?: string },
+): Promise<{
+  accessToken: string;
+  refreshToken: string;
+  session: SessionRecord;
+  refreshTtlSec: number;
+  accessExpiresAt: Date;
+}> {
+  const ttlSec = REFRESH_TTL_BY_PORTAL[options.portal];
+  const session = await createUserSession({
+    userId: user.id,
+    deviceLabel: options.deviceLabel || `${options.portal} (${request.headers['user-agent']?.slice(0, 60) || 'web'})`,
+    ipAddress: request.ip,
+    ttlSeconds: ttlSec,
+  });
+
+  const jti = crypto.randomUUID();
+  const state: RefreshTokenState = {
+    jti,
+    userId: user.id,
+    role: user.role,
+    tenantId: user.tenantId,
+    portal: options.portal,
+    expiresAtMs: session.expiresAt.getTime(),
+  };
+
+  await redisAdapter.set(refreshStateKey(session.id), JSON.stringify(state), ttlSec);
+
+  const accessToken = signAccessToken(request.server, user, session.id);
+  const refreshToken = signRefreshToken(request.server, {
+    userId: user.id,
+    sid: session.id,
+    jti,
+    portal: options.portal,
+    ttlSec,
+  });
+
+  return {
+    accessToken,
+    refreshToken,
+    session,
+    refreshTtlSec: ttlSec,
+    accessExpiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_SEC * 1000),
+  };
+}
+
+export type RotateRefreshResult =
+  | {
+      ok: true;
+      portal: AuthPortal;
+      user: User;
+      sid: string;
+      accessToken: string;
+      refreshToken: string;
+      refreshTtlSec: number;
+      expiresAt: Date;
+      accessExpiresAt: Date;
+    }
+  | {
+      ok: false;
+      reason:
+        | 'invalid_token'
+        | 'portal_mismatch'
+        | 'session_revoked'
+        | 'refresh_reuse_detected'
+        | 'refresh_state_missing'
+        | 'session_expired'
+        | 'user_not_found';
+      sid?: string;
+    };
+
+export async function rotateRefreshSession(
+  request: FastifyRequest,
+  refreshToken: string,
+  expectedPortal?: AuthPortal,
+): Promise<RotateRefreshResult> {
+  let decoded: Record<string, any>;
+  try {
+    decoded = request.server.jwt.verify<Record<string, any>>(refreshToken);
+  } catch {
+    return { ok: false, reason: 'invalid_token' };
+  }
+
+  if (
+    !decoded ||
+    decoded.tokenType !== 'refresh' ||
+    typeof decoded.sid !== 'string' ||
+    typeof decoded.jti !== 'string' ||
+    typeof decoded.userId !== 'string'
+  ) {
+    return { ok: false, reason: 'invalid_token' };
+  }
+
+  const sid = decoded.sid;
+  const portal = (decoded.portal as AuthPortal) || expectedPortal || 'marketplace';
+  if (expectedPortal && decoded.portal && decoded.portal !== expectedPortal) {
+    return { ok: false, reason: 'portal_mismatch', sid };
+  }
+
+  if (await isSessionRevoked(sid)) {
+    return { ok: false, reason: 'session_revoked', sid };
+  }
+
+  const wasUsed = await redisAdapter.get(usedRefreshKey(decoded.jti));
+  if (wasUsed) {
+    logger.warn({ sid, userId: decoded.userId, jti: decoded.jti }, 'auth.refresh_reuse_detected');
+    await revokeUserSession(sid);
+    return { ok: false, reason: 'refresh_reuse_detected', sid };
+  }
+
+  const rawState = await redisAdapter.get(refreshStateKey(sid));
+  if (!rawState) {
+    return { ok: false, reason: 'refresh_state_missing', sid };
+  }
+
+  let state: RefreshTokenState;
+  try {
+    state = JSON.parse(rawState) as RefreshTokenState;
+  } catch {
+    await revokeUserSession(sid);
+    return { ok: false, reason: 'refresh_state_missing', sid };
+  }
+
+  if (state.jti !== decoded.jti) {
+    logger.warn({ sid, userId: decoded.userId }, 'auth.refresh_jti_mismatch_revoking_session');
+    await revokeUserSession(sid);
+    return { ok: false, reason: 'refresh_reuse_detected', sid };
+  }
+
+  if (Date.now() > state.expiresAtMs) {
+    await revokeUserSession(sid);
+    return { ok: false, reason: 'session_expired', sid };
+  }
+
+  const user = await resolveUserFromClaims({ userId: decoded.userId, authSource: 'fastify_jwt' });
+  if (!user) {
+    await revokeUserSession(sid);
+    return { ok: false, reason: 'user_not_found', sid };
+  }
+
+  const remainingTtlSec = Math.max(60, Math.ceil((state.expiresAtMs - Date.now()) / 1000));
+  await redisAdapter.set(usedRefreshKey(decoded.jti), '1', remainingTtlSec);
+
+  const nextJti = crypto.randomUUID();
+  const nextState: RefreshTokenState = {
+    ...state,
+    jti: nextJti,
+    role: user.role,
+    tenantId: user.tenantId,
+  };
+  await redisAdapter.set(refreshStateKey(sid), JSON.stringify(nextState), remainingTtlSec);
+
+  const accessToken = signAccessToken(request.server, user, sid);
+  const nextRefreshToken = signRefreshToken(request.server, {
+    userId: user.id,
+    sid,
+    jti: nextJti,
+    portal: state.portal || portal,
+    ttlSec: remainingTtlSec,
+  });
+
+  return {
+    ok: true,
+    portal: state.portal || portal,
+    user,
+    sid,
+    accessToken,
+    refreshToken: nextRefreshToken,
+    refreshTtlSec: remainingTtlSec,
+    expiresAt: new Date(state.expiresAtMs),
+    accessExpiresAt: new Date(Date.now() + ACCESS_TOKEN_TTL_SEC * 1000),
+  };
+}
+
+export async function createOAuthExchangeCode(params: {
+  userId: string;
+  portal: AuthPortal;
+  deviceLabel?: string;
+  ipAddress?: string;
+}): Promise<string> {
+  const code = crypto.randomBytes(32).toString('hex');
+  await redisAdapter.set(`auth:oauth:exchange:${code}`, JSON.stringify(params), 90);
+  return code;
+}
+
+export async function consumeOAuthExchangeCode(code: string): Promise<{
+  userId: string;
+  portal: AuthPortal;
+  deviceLabel?: string;
+  ipAddress?: string;
+} | null> {
+  const key = `auth:oauth:exchange:${code}`;
+  const raw = await redisAdapter.get(key);
+  if (!raw) return null;
+  await redisAdapter.del(key);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }

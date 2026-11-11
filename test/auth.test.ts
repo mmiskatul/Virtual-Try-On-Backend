@@ -282,6 +282,82 @@ async function runAuthTests() {
   });
   assert(adminNewLogin.statusCode === 200, 'Admin logs in with new password');
 
+  // --- 7. HttpOnly Cookie Session, Access & Rotating Refresh Flow ---
+  console.log('\n--- [7. HttpOnly Cookie Session, Access & Rotating Refresh Flow] ---');
+  const extractSetCookies = (header: string | string[] | undefined): Record<string, { value: string; raw: string }> => {
+    const arr = !header ? [] : Array.isArray(header) ? header : [header];
+    const map: Record<string, { value: string; raw: string }> = {};
+    for (const line of arr) {
+      const semi = line.indexOf(';');
+      const pair = semi === -1 ? line : line.slice(0, semi);
+      const eq = pair.indexOf('=');
+      if (eq > 0) {
+        map[pair.slice(0, eq).trim()] = { value: decodeURIComponent(pair.slice(eq + 1).trim()), raw: line };
+      }
+    }
+    return map;
+  };
+
+  const cookieLogin = await app.inject({
+    method: 'POST',
+    url: '/api/v1/marketplace/auth/login',
+    headers: { 'x-auth-transport': 'cookie', 'x-auth-portal': 'marketplace' },
+    payload: { email: 'sarah.miller@example.com', password: 'Test-Customer-Pass-1' },
+  });
+  assert(cookieLogin.statusCode === 200, 'Cookie-only marketplace login succeeds');
+  const cookieLoginBody = JSON.parse(cookieLogin.body);
+  assert(cookieLoginBody.token === undefined, 'Cookie transport omits raw token from JSON response body');
+  assert(Boolean(cookieLoginBody.session?.id), 'Cookie login returns non-secret session metadata');
+
+  const mktCookies1 = extractSetCookies(cookieLogin.headers['set-cookie']);
+  assert(Boolean(mktCookies1.vtry_mkt_access?.value), 'vtry_mkt_access cookie set');
+  assert(Boolean(mktCookies1.vtry_mkt_refresh?.value), 'vtry_mkt_refresh cookie set');
+  assert(Boolean(mktCookies1.vtry_mkt_sid?.value), 'vtry_mkt_sid cookie set');
+  assert(/;\s*HttpOnly/i.test(mktCookies1.vtry_mkt_access.raw), 'Access cookie has HttpOnly flag');
+  assert(/;\s*SameSite=Lax/i.test(mktCookies1.vtry_mkt_refresh.raw), 'Refresh cookie has SameSite=Lax flag');
+
+  const cookieHeader1 = `vtry_mkt_access=${encodeURIComponent(mktCookies1.vtry_mkt_access.value)}; vtry_mkt_refresh=${encodeURIComponent(mktCookies1.vtry_mkt_refresh.value)}; vtry_mkt_sid=${encodeURIComponent(mktCookies1.vtry_mkt_sid.value)}`;
+  const meFromCookie = await app.inject({
+    method: 'GET',
+    url: '/api/v1/marketplace/auth/me',
+    headers: { cookie: cookieHeader1, 'x-auth-portal': 'marketplace' },
+  });
+  assert(meFromCookie.statusCode === 200, '/me authenticates via HttpOnly access cookie without Bearer header');
+  assert(JSON.parse(meFromCookie.body).user.email === 'sarah.miller@example.com', '/me returns expected cookie user');
+
+  const refreshRes = await app.inject({
+    method: 'POST',
+    url: '/api/v1/marketplace/auth/refresh',
+    headers: { cookie: cookieHeader1, 'x-auth-transport': 'cookie', 'x-auth-portal': 'marketplace' },
+  });
+  assert(refreshRes.statusCode === 200, 'Refresh endpoint rotates HttpOnly cookies cleanly');
+  assert(JSON.parse(refreshRes.body).token === undefined, 'Cookie-mode /refresh omits token from JSON body');
+  const mktCookies2 = extractSetCookies(refreshRes.headers['set-cookie']);
+  assert(Boolean(mktCookies2.vtry_mkt_access?.value), 'Rotated access cookie issued');
+  assert(
+    Boolean(mktCookies2.vtry_mkt_refresh?.value) &&
+      mktCookies2.vtry_mkt_refresh.value !== mktCookies1.vtry_mkt_refresh.value,
+    'Refresh cookie rotates to a brand-new JTI token',
+  );
+
+  const cookieHeader2 = `vtry_mkt_access=${encodeURIComponent(mktCookies2.vtry_mkt_access.value)}; vtry_mkt_refresh=${encodeURIComponent(mktCookies2.vtry_mkt_refresh.value)}; vtry_mkt_sid=${encodeURIComponent(mktCookies2.vtry_mkt_sid.value)}`;
+  const logoutRes = await app.inject({
+    method: 'POST',
+    url: '/api/v1/marketplace/auth/logout',
+    headers: { cookie: cookieHeader2, 'x-auth-portal': 'marketplace' },
+  });
+  assert(logoutRes.statusCode === 200, '/logout succeeds cleanly');
+  const clearedCookies = extractSetCookies(logoutRes.headers['set-cookie']);
+  assert(/Max-Age=0/i.test(clearedCookies.vtry_mkt_access?.raw || ''), '/logout expires vtry_mkt_access cookie');
+  assert(/Max-Age=0/i.test(clearedCookies.vtry_mkt_refresh?.raw || ''), '/logout expires vtry_mkt_refresh cookie');
+
+  const revokedMe = await app.inject({
+    method: 'GET',
+    url: '/api/v1/marketplace/auth/me',
+    headers: { cookie: cookieHeader2, 'x-auth-portal': 'marketplace' },
+  });
+  assert(revokedMe.statusCode === 401, 'Old access cookie fails after /logout session revocation');
+
   // Reset snapshot cleanly back to baseline demo data
   db.reset();
   seedTestUsers();

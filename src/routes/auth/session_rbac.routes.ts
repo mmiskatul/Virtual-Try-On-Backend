@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db } from '../../infrastructure/database.js';
 import { getGlobalPrisma } from '../../infrastructure/prisma.js';
 import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import { clearPortalAuthCookies, resolvePortalFromRequest } from '../../infrastructure/auth_cookies.js';
 import { okResponse } from '../../infrastructure/http.js';
 import {
   listUserSessions,
@@ -62,6 +63,9 @@ export async function sessionRbacRoutes(app: FastifyInstance) {
     }
 
     await revokeUserSession(id);
+    if (request.sessionId === id) {
+      clearPortalAuthCookies(reply, request, resolvePortalFromRequest(request));
+    }
     await recordAudit({
       actorId: request.authUser!.id,
       actorRole: request.authUser!.role,
@@ -77,8 +81,9 @@ export async function sessionRbacRoutes(app: FastifyInstance) {
   });
 
   // Revoke all active sessions for current user
-  app.post('/api/v1/auth/sessions/revoke-all', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
+  app.post('/api/v1/auth/sessions/revoke-all', { preHandler: [authenticateToken] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const count = await revokeAllUserSessions(request.authUser!.id);
+    clearPortalAuthCookies(reply, request, resolvePortalFromRequest(request));
     await recordAudit({
       actorId: request.authUser!.id,
       actorRole: request.authUser!.role,

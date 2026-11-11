@@ -190,6 +190,79 @@ async function runSecurityTests() {
   }
   assert(lockedOut, 'Repeated invalid OTP attempts trigger 429 lockout and token invalidation');
 
+  // --- 5. Refresh Token Isolation & Reuse Attack Mitigation ---
+  console.log('\n--- [5. Refresh Token Isolation & Reuse Attack Mitigation] ---');
+  const brandCookieLogin = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/login',
+    headers: { 'x-auth-transport': 'cookie', 'x-auth-portal': 'brand' },
+    payload: { email: 'elena@auraatelier.com', password: 'Test-Brand-Pass-1' },
+  });
+  assert(brandCookieLogin.statusCode === 200, 'Brand cookie login succeeds for security test');
+  const brandCookiesHeader = brandCookieLogin.headers['set-cookie'];
+  const cookieLines = Array.isArray(brandCookiesHeader) ? brandCookiesHeader : [String(brandCookiesHeader || '')];
+  const getVal = (name: string) => {
+    const match = cookieLines.find((l) => l.startsWith(`${name}=`));
+    return match ? decodeURIComponent(match.slice(name.length + 1, match.indexOf(';'))) : '';
+  };
+  const brandAccess = getVal('vtry_brand_access');
+  const brandRefresh = getVal('vtry_brand_refresh');
+  const brandSid = getVal('vtry_brand_sid');
+  assert(Boolean(brandAccess && brandRefresh && brandSid), 'Brand portal receives scoped vtry_brand_* cookies');
+
+  // Refresh token must NEVER be accepted as an Access Token (Bearer OR access cookie)
+  const refreshAsBearer = await app.inject({
+    method: 'GET',
+    url: '/api/v1/auth/me',
+    headers: { authorization: `Bearer ${brandRefresh}`, 'x-auth-portal': 'brand' },
+  });
+  assert(refreshAsBearer.statusCode === 401, 'Refresh token rejected when presented as Bearer access token');
+
+  // Rotate refresh once legitimately
+  const rotated1 = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/refresh',
+    headers: {
+      cookie: `vtry_brand_access=${encodeURIComponent(brandAccess)}; vtry_brand_refresh=${encodeURIComponent(brandRefresh)}; vtry_brand_sid=${encodeURIComponent(brandSid)}`,
+      'x-auth-portal': 'brand',
+      'x-auth-transport': 'cookie',
+    },
+  });
+  assert(rotated1.statusCode === 200, 'Legitimate brand refresh rotation succeeds');
+  const rotatedLines = Array.isArray(rotated1.headers['set-cookie'])
+    ? rotated1.headers['set-cookie']
+    : [String(rotated1.headers['set-cookie'] || '')];
+  const rotatedAccess = (() => {
+    const m = rotatedLines.find((l) => l.startsWith('vtry_brand_access='));
+    return m ? decodeURIComponent(m.slice('vtry_brand_access='.length, m.indexOf(';'))) : '';
+  })();
+
+  // Replay old refresh token -> triggers reuse detection and revokes the entire session
+  const reuseAttempt = await app.inject({
+    method: 'POST',
+    url: '/api/v1/auth/refresh',
+    headers: {
+      cookie: `vtry_brand_refresh=${encodeURIComponent(brandRefresh)}; vtry_brand_sid=${encodeURIComponent(brandSid)}`,
+      'x-auth-portal': 'brand',
+    },
+  });
+  assert(reuseAttempt.statusCode === 401, 'Replayed refresh token is rejected');
+  assert(
+    JSON.parse(reuseAttempt.body).error === 'SessionCompromised',
+    'Refresh reuse attempt signals SessionCompromised',
+  );
+
+  // Even the newly rotated access token for the same session is now revoked
+  const compromisedMe = await app.inject({
+    method: 'GET',
+    url: '/api/v1/auth/me',
+    headers: {
+      cookie: `vtry_brand_access=${encodeURIComponent(rotatedAccess)}`,
+      'x-auth-portal': 'brand',
+    },
+  });
+  assert(compromisedMe.statusCode === 401, 'Session revocation invalidates active access tokens after reuse attack');
+
   db.reset();
   seedTestUsers();
 

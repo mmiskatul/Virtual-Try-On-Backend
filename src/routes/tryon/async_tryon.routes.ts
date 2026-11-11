@@ -1,13 +1,12 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import { authenticateToken, resolveOptionalAuthUser } from '../../infrastructure/auth.guard.js';
 import { okResponse } from '../../infrastructure/http.js';
 import {
   TryOnGenerationCompletedV1Schema,
   TryOnGenerationFailedV1Schema,
 } from '../../infrastructure/events.contract.js';
 import { LogicalBucket } from '../../infrastructure/storage.adapter.js';
-import { isSessionRevoked, resolveUserFromClaims, verifyDualJwt } from '../../modules/auth/jwt.verifier.js';
 import { PLATFORM_ADMIN_ROLE_CODES } from '../../modules/rbac/rbac.catalog.js';
 import { tryonEventsBus, tryonOrchestrator } from '../../modules/tryon/tryon.orchestrator.js';
 
@@ -40,25 +39,13 @@ async function resolveOptionalAuth(request: FastifyRequest): Promise<{
   tenantId?: string;
   isSuperAdmin: boolean;
 }> {
-  const authHeader = request.headers.authorization;
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return { isSuperAdmin: false };
-  }
-  try {
-    const claims = await verifyDualJwt(request, authHeader.substring(7));
-    if (claims.sid && (await isSessionRevoked(claims.sid))) {
-      return { isSuperAdmin: false };
-    }
-    const user = await resolveUserFromClaims(claims);
-    if (!user) return { isSuperAdmin: false };
-    return {
-      userId: user.id,
-      tenantId: user.tenantId,
-      isSuperAdmin: PLATFORM_ADMIN_ROLE_CODES.has(user.role),
-    };
-  } catch {
-    return { isSuperAdmin: false };
-  }
+  const { user } = await resolveOptionalAuthUser(request);
+  if (!user) return { isSuperAdmin: false };
+  return {
+    userId: user.id,
+    tenantId: user.tenantId,
+    isSuperAdmin: PLATFORM_ADMIN_ROLE_CODES.has(user.role),
+  };
 }
 
 export async function asyncTryOnRoutes(app: FastifyInstance) {
