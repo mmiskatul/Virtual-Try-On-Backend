@@ -2,7 +2,6 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import crypto from 'node:crypto';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken } from '../../infrastructure/auth.guard.js';
-import { getValidatedEnv } from '../../infrastructure/env.schema.js';
 import { User } from '../../domain/types.js';
 import { createUserSession } from '../../modules/auth/jwt.verifier.js';
 import { recordAudit } from '../../modules/audit/audit.service.js';
@@ -50,26 +49,48 @@ export async function customerAuthRoutes(app: FastifyInstance) {
     };
   });
 
-  // Trusted NextAuth Google OAuth Customer Sync (protected by X-Service-Key)
+  // Google OAuth Customer Sync (verified directly via Google OIDC id_token)
   app.post('/api/v1/marketplace/auth/oauth-google', async (request: FastifyRequest, reply: FastifyReply) => {
-    const keyHeader = request.headers['x-service-key'];
-    const expectedKey = getValidatedEnv().INTERNAL_SERVICE_KEY;
-    if (
-      typeof keyHeader !== 'string' ||
-      keyHeader.length !== expectedKey.length ||
-      !crypto.timingSafeEqual(Buffer.from(keyHeader), Buffer.from(expectedKey))
-    ) {
-      return reply.status(403).send({ error: 'Forbidden', message: 'Invalid internal X-Service-Key.' });
+    const body = (request.body as any) || {};
+    const idToken = typeof body.idToken === 'string' ? body.idToken.trim() : '';
+    if (!idToken) {
+      return reply.status(401).send({ error: 'Unauthorized', message: 'Valid Google ID token is required.' });
     }
 
-    const body = (request.body as any) || {};
-    const email = typeof body.email === 'string' ? normalizeEmail(body.email) : '';
-    const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : email.split('@')[0] || 'Customer';
-    if (!email || !isValidEmail(email)) {
-      return reply.status(400).send({ error: 'ValidationError', message: 'Valid Google email required.' });
+    let tokenInfo: Record<string, any>;
+    try {
+      const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`);
+      if (!verifyRes.ok) {
+        return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid Google ID token.' });
+      }
+      tokenInfo = (await verifyRes.json()) as Record<string, any>;
+    } catch {
+      return reply.status(502).send({ error: 'UpstreamError', message: 'Unable to verify Google ID token.' });
+    }
+
+    const expectedClientId = process.env.GOOGLE_CLIENT_ID?.trim();
+    if (expectedClientId && tokenInfo.aud !== expectedClientId) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Google token audience mismatch.' });
+    }
+
+    const emailVerified = tokenInfo.email_verified === true || tokenInfo.email_verified === 'true';
+    const email = typeof tokenInfo.email === 'string' ? normalizeEmail(tokenInfo.email) : '';
+    const name =
+      (typeof tokenInfo.name === 'string' && tokenInfo.name.trim()) ||
+      (typeof body.name === 'string' && body.name.trim()) ||
+      email.split('@')[0] ||
+      'Customer';
+    if (!emailVerified || !email || !isValidEmail(email)) {
+      return reply.status(400).send({ error: 'ValidationError', message: 'Verified Google email required.' });
     }
 
     let user = db.getUserByEmail(email);
+    if (user && user.role !== 'CUSTOMER') {
+      return reply.status(403).send({
+        error: 'PortalMismatch',
+        message: 'This email belongs to a Brand or Admin account. Please sign in on that portal.',
+      });
+    }
     if (!user) {
       user = db.createUser({
         id: `user_cust_${Math.random().toString(36).substring(2, 9)}`,

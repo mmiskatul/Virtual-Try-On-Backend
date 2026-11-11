@@ -1,8 +1,6 @@
-import crypto from 'node:crypto';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { authenticateToken } from '../../infrastructure/auth.guard.js';
-import { getValidatedEnv } from '../../infrastructure/env.schema.js';
 import { okResponse } from '../../infrastructure/http.js';
 import {
   TryOnGenerationCompletedV1Schema,
@@ -239,12 +237,13 @@ export async function asyncTryOnRoutes(app: FastifyInstance) {
     return okResponse(cancelled.job, request.correlationId);
   });
 
-  // 7. Internal Worker / AI Service HTTP callback settlement (X-Service-Key protected)
-  app.post('/api/v1/internal/try-on/settlement', async (request: FastifyRequest, reply: FastifyReply) => {
-    const keyHeader = request.headers['x-service-key'];
-    const expectedKey = getValidatedEnv().INTERNAL_SERVICE_KEY;
-    if (typeof keyHeader !== 'string' || keyHeader.length !== expectedKey.length || !crypto.timingSafeEqual(Buffer.from(keyHeader), Buffer.from(expectedKey))) {
-      return reply.status(403).send({ error: 'Forbidden', message: 'Invalid internal X-Service-Key header.' });
+  // 7. Internal Worker / Admin HTTP callback settlement
+  app.post('/api/v1/internal/try-on/settlement', { preHandler: [authenticateToken] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const isAdmin = (request.roleCodes || [request.authUser?.role || '']).some((r) =>
+      PLATFORM_ADMIN_ROLE_CODES.has(String(r).toUpperCase())
+    );
+    if (!isAdmin) {
+      return reply.status(403).send({ error: 'Forbidden', message: 'Platform admin authorization required.' });
     }
 
     const body = (request.body as Record<string, unknown>) || {};

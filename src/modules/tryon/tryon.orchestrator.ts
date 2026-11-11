@@ -447,7 +447,6 @@ export class TryOnOrchestrator {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Service-Key': env.INTERNAL_SERVICE_KEY,
             'X-Correlation-Id': event.correlationId,
           },
           body: JSON.stringify(event),
