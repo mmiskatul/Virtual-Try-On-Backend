@@ -1,3 +1,5 @@
+import './setup_env.js';
+import { seedTestUsers } from './helpers.js';
 import { createApp } from '../src/server.js';
 import { db } from '../src/infrastructure/database.js';
 
@@ -5,6 +7,7 @@ let app = createApp('all');
 
 async function runTests() {
   db.reset();
+  seedTestUsers();
   console.log('🧪 Running Comprehensive Unified Fastify 5 Backend Test Suite...\n');
   let passed = 0;
   let failed = 0;
@@ -37,7 +40,7 @@ async function runTests() {
   const brandLoginRes = await app.inject({
     method: 'POST',
     url: '/api/v1/auth/login',
-    payload: { email: 'elena@auraatelier.com', password: 'Aura@123456' }
+    payload: { email: 'elena@auraatelier.com', password: 'Test-Brand-Pass-1' }
   });
   assert(brandLoginRes.statusCode === 200, 'Brand login returns 200');
   const brandAuth = JSON.parse(brandLoginRes.body);
@@ -161,7 +164,7 @@ async function runTests() {
   const adminLoginRes = await app.inject({
     method: 'POST',
     url: '/api/v1/admin/auth/login',
-    payload: { email: 'admin@vton-platform.io', password: 'Admin@123456' }
+    payload: { email: 'admin@vton-platform.io', password: 'Test-Admin-Pass-1' }
   });
   assert(adminLoginRes.statusCode === 200, 'Super admin login returns 200');
   const adminToken = JSON.parse(adminLoginRes.body).token;

@@ -181,3 +181,32 @@ export interface AuthTokenPayload {
   tenantId?: string;
   email?: string;
 }
+
+export type GenerationStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
+export type LedgerStatus = 'RESERVED' | 'CONSUMED' | 'RELEASED';
+
+export interface GenerationJob {
+  id: string;
+  tenantId: string; // always derived server-side from the product, never from the client
+  productId: string;
+  category: string;
+  status: GenerationStatus;
+  accessTokenHash: string; // hash of the secret returned to the originating guest session
+  idempotencyKey?: string;
+  providerJobId?: string;
+  errorCode?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface UsageLedgerEntry {
+  id: string;
+  generationId: string; // unique: one ledger entry per generation
+  tenantId: string;
+  billingPeriod: string; // YYYY-MM
+  reservedUnits: number;
+  finalUnits?: number;
+  status: LedgerStatus;
+  createdAt: number;
+  updatedAt: number;
+}

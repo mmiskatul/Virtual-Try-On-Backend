@@ -38,6 +38,70 @@ function isSafeRemoteImageUrl(rawUrl: string): boolean {
   }
 }
 
+
+const TOKEN_HEADER = 'x-try-on-token';
+
+/**
+ * Resolves the shop (tenant) for a try-on request on the SERVER from the product.
+ * Any tenantId sent by the browser is ignored, then atomically reserves quota.
+ * Returns null after sending an error reply.
+ */
+function reserveForRequest(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  productId: unknown,
+  category: unknown
+) {
+  if (typeof productId !== 'string' || !productId.trim()) {
+    reply.status(400).send({ error: 'ValidationError', message: 'productId is required.' });
+    return null;
+  }
+  const product = db.getProductById(productId);
+  if (!product || !product.marketplacePublished) {
+    reply.status(404).send({ error: 'ProductNotFound', message: 'Product not found.' });
+    return null;
+  }
+  if (!product.isTryOnEligible) {
+    reply.status(403).send({ error: 'TryOnNotEnabled', message: 'Virtual try-on is not enabled for this product.' });
+    return null;
+  }
+  const tenant = db.getTenantById(product.tenantId);
+  if (!tenant || tenant.status !== 'ACTIVE') {
+    reply.status(403).send({ error: 'ShopUnavailable', message: 'This shop is not currently available.' });
+    return null;
+  }
+
+  const rawKey = request.headers['idempotency-key'];
+  const idempotencyKey = typeof rawKey === 'string' && rawKey.length > 0 && rawKey.length <= 128 ? rawKey : undefined;
+
+  const result = db.reserveGeneration({
+    tenantId: product.tenantId,
+    productId: product.id,
+    category: typeof category === 'string' && category ? category : product.tryOnCategory || 'tops',
+    idempotencyKey
+  });
+
+  if (!result.ok) {
+    if (result.error === 'QUOTA_EXHAUSTED') {
+      reply.status(429).send({
+        error: 'QuotaExhausted',
+        message: 'This shop has used its try-on allowance for the current billing period.'
+      });
+    } else {
+      reply.status(403).send({ error: 'ShopUnavailable', message: 'Try-on is not available for this shop.' });
+    }
+    return null;
+  }
+  return result;
+}
+
+function isTerminalComplete(status: unknown): boolean {
+  return String(status || '').toLowerCase() === 'completed';
+}
+function isTerminalFailed(status: unknown): boolean {
+  return ['failed', 'error', 'cancelled'].includes(String(status || '').toLowerCase());
+}
+
 export async function marketplaceTryOnRoutes(app: FastifyInstance) {
   // Query Active VTON Engine / API Provider Status
   app.get('/api/v1/try-on/provider', async () => {
@@ -54,7 +118,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
 
   // Dispatch Virtual Try-On Job (External API or Local AI Engine)
   app.post('/api/v1/try-on/submit', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { personImage, garmentImage, category, tenantId, prompt, model_name, modelName } = (request.body as any) || {};
+    const { personImage, garmentImage, category, productId, prompt, model_name, modelName } = (request.body as any) || {};
 
     if (!personImage || !garmentImage) {
       return reply.status(400).send({
@@ -63,9 +127,30 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
       });
     }
 
-    if (tenantId) {
-      db.recordTryOnUsage(tenantId);
+    const reservation = reserveForRequest(request, reply, productId, category);
+    if (!reservation) return;
+    const { job, accessToken } = reservation;
+
+    if (reservation.duplicate) {
+      return reply.status(200).send({
+        jobId: job.providerJobId || job.id,
+        generationId: job.id,
+        status: job.status,
+        duplicate: true
+      });
     }
+
+    const respond = (code: number, payload: Record<string, any>) => {
+      const providerJobId = payload.jobId || payload.job_id;
+      if (providerJobId) db.attachProviderJob(job.id, providerJobId);
+      if (isTerminalComplete(payload.status)) db.finalizeGeneration(job.id, 'COMPLETED');
+      return reply.status(code).send({
+        ...payload,
+        jobId: providerJobId || job.id,
+        generationId: job.id,
+        accessToken
+      });
+    };
 
     // 1. If user configured external VTON API in .env, dispatch to external provider
     if (externalVtonService.isConfigured()) {
@@ -73,7 +158,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
         const result = await externalVtonService.submitTryOn({
           personImage,
           garmentImage,
-          category: category || 'tops',
+          category: job.category,
           prompt
         });
 
@@ -85,10 +170,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
           }
         }
 
-        return reply.status(201).send({
-          ...result,
-          provider: externalVtonService.detectProvider()
-        });
+        return respond(201, { ...result, provider: externalVtonService.detectProvider() });
       } catch (extErr: any) {
         console.warn('[VTON] External API dispatch failed, falling back to AI Service:', extErr.message);
         // Fall through to local AI service if external API failed
@@ -103,7 +185,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
         body: JSON.stringify({
           personImage,
           garmentImage,
-          category: category || 'tops',
+          category: job.category,
           prompt,
           model_name: model_name || modelName
         })
@@ -111,6 +193,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
 
       if (!response.ok) {
         const errorText = await response.text();
+        db.finalizeGeneration(job.id, 'FAILED', 'AI_SERVICE_ERROR');
         return reply.status(response.status).send({
           error: 'AiServiceError',
           message: `AI service error: ${errorText}`
@@ -118,22 +201,20 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
       }
 
       const data = await response.json();
-      return reply.status(201).send(data);
+      return respond(201, data);
     } catch (err: any) {
-      // Graceful simulation fallback
-      const mockJobId = `job_${Date.now()}_sim`;
-      return reply.status(202).send({
-        jobId: mockJobId,
-        status: 'QUEUED',
-        queuePosition: 1,
-        message: 'Try-on job accepted into processing pipeline.'
+      // Release the reserved unit; never fabricate a job for an unavailable provider.
+      db.finalizeGeneration(job.id, 'FAILED', 'AI_SERVICE_UNAVAILABLE');
+      return reply.status(503).send({
+        error: 'AiServiceUnavailable',
+        message: 'The try-on service is temporarily unavailable. Your allowance was not used. Please try again shortly.'
       });
     }
   });
 
   // Direct Synchronous Try-On with Automatic Cloudinary Persistence
   app.post('/api/v1/try-on/direct', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { personImage, garmentImage, category, tenantId, prompt, model_name, modelName } = (request.body as any) || {};
+    const { personImage, garmentImage, category, productId, prompt, model_name, modelName } = (request.body as any) || {};
 
     if (!personImage || !garmentImage) {
       return reply.status(400).send({
@@ -142,8 +223,17 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
       });
     }
 
-    if (tenantId) {
-      db.recordTryOnUsage(tenantId);
+    const reservation = reserveForRequest(request, reply, productId, category);
+    if (!reservation) return;
+    const { job, accessToken } = reservation;
+
+    if (reservation.duplicate) {
+      return reply.status(200).send({
+        jobId: job.providerJobId || job.id,
+        generationId: job.id,
+        status: job.status,
+        duplicate: true
+      });
     }
 
     try {
@@ -153,7 +243,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
         body: JSON.stringify({
           personImage,
           garmentImage,
-          category: category || 'tops',
+          category: job.category,
           prompt,
           model_name: model_name || modelName
         })
@@ -161,12 +251,14 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
 
       if (!response.ok) {
         const errText = await response.text();
+        db.finalizeGeneration(job.id, 'FAILED', 'AI_SERVICE_ERROR');
         return reply.status(response.status).send({ error: 'AiServiceError', message: errText });
       }
 
       const data: any = await response.json();
       const jobId = data.job_id || data.jobId || `direct_${Date.now()}`;
       const rawResultUrl = data.resultUrl || data.output_url || data.result?.output_url;
+      db.attachProviderJob(job.id, jobId);
 
       if (rawResultUrl) {
         const cloudUrl = await uploadTryOnResultToCloudinary(jobId, rawResultUrl);
@@ -176,10 +268,14 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
           if (data.result) data.result.output_url = cloudUrl;
           data.storageProvider = 'cloudinary';
         }
+        db.finalizeGeneration(job.id, 'COMPLETED');
+      } else if (isTerminalFailed(data.status)) {
+        db.finalizeGeneration(job.id, 'FAILED', 'PROVIDER_FAILED');
       }
 
-      return reply.status(200).send(data);
+      return reply.status(200).send({ ...data, generationId: job.id, accessToken });
     } catch (err: any) {
+      db.finalizeGeneration(job.id, 'FAILED', 'EXECUTION_ERROR');
       return reply.status(500).send({
         error: 'TryOnExecutionFailed',
         message: `Direct try-on execution error: ${err.message}`
@@ -268,7 +364,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
     });
   });
 
-  // Check Job Status
+  // Check Job Status (only the session that created the job, holding its access token, may read it)
   app.get('/api/v1/try-on/status/:jobId', async (request: FastifyRequest, reply: FastifyReply) => {
     const { jobId } = request.params as { jobId: string };
     if (!jobId || !SAFE_JOB_ID_REGEX.test(jobId)) {
@@ -278,9 +374,23 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
       });
     }
 
+    const rawToken = request.headers[TOKEN_HEADER] ?? (request.query as any)?.token;
+    const token = typeof rawToken === 'string' ? rawToken : undefined;
+    const job = db.getGenerationForSession(jobId, token);
+    if (!job) {
+      // Same response for "unknown" and "not yours" so IDs cannot be probed.
+      return reply.status(404).send({ error: 'NotFound', message: 'Try-on job not found.' });
+    }
+
+    const settle = (status: unknown) => {
+      if (isTerminalComplete(status)) db.finalizeGeneration(job.id, 'COMPLETED');
+      else if (isTerminalFailed(status)) db.finalizeGeneration(job.id, 'FAILED', 'PROVIDER_FAILED');
+    };
+
     // Check external VTON service cache first
     const externalStatus = await externalVtonService.getStatus(jobId);
     if (externalStatus) {
+      settle(externalStatus.status);
       return {
         jobId: externalStatus.jobId,
         status: externalStatus.status,
@@ -298,7 +408,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
       const data: any = await response.json();
 
       // When AI service completes the generation, backend uploads the result to Cloudinary
-      const isCompleted = (data.status || '').toLowerCase() === 'completed';
+      const isCompleted = isTerminalComplete(data.status);
       const rawResultUrl = data.resultUrl || data.output_url || data.result?.output_url;
 
       if (isCompleted && rawResultUrl) {
@@ -311,12 +421,12 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
         }
       }
 
+      settle(data.status);
       return data;
     } catch (err) {
-      return reply.send({
-        jobId,
-        status: 'COMPLETED',
-        resultUrl: 'https://images.unsplash.com/photo-1515372039744-b8f02a3ae446?w=800'
+      return reply.status(502).send({
+        error: 'AiServiceUnavailable',
+        message: 'Could not reach the try-on service. Please retry.'
       });
     }
   });

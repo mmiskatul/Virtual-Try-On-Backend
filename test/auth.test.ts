@@ -1,3 +1,5 @@
+import './setup_env.js';
+import { seedTestUsers } from './helpers.js';
 import { createApp } from '../src/server.js';
 import { db } from '../src/infrastructure/database.js';
 
@@ -5,6 +7,7 @@ const app = createApp('all');
 
 async function runAuthTests() {
   db.reset();
+  seedTestUsers();
   console.log('\n=============================================================');
   console.log('🔐 Running Complete Auth, Verification & Recovery Test Suite');
   console.log('=============================================================\n');
@@ -27,21 +30,21 @@ async function runAuthTests() {
   const demoCustomerLogin = await app.inject({
     method: 'POST',
     url: '/api/v1/marketplace/auth/login',
-    payload: { email: 'sarah.miller@example.com', password: 'password123' },
+    payload: { email: 'sarah.miller@example.com', password: 'Test-Customer-Pass-1' },
   });
   assert(demoCustomerLogin.statusCode === 200, 'Seeded customer sarah.miller@example.com logs in');
 
   const demoBrandLogin = await app.inject({
     method: 'POST',
     url: '/api/v1/auth/login',
-    payload: { email: 'elena@auraatelier.com', password: 'Aura@123456' },
+    payload: { email: 'elena@auraatelier.com', password: 'Test-Brand-Pass-1' },
   });
   assert(demoBrandLogin.statusCode === 200, 'Seeded brand owner elena@auraatelier.com logs in');
 
   const demoAdminLogin = await app.inject({
     method: 'POST',
     url: '/api/v1/admin/auth/login',
-    payload: { email: 'admin@vton-platform.io', password: 'Admin@123456' },
+    payload: { email: 'admin@vton-platform.io', password: 'Test-Admin-Pass-1' },
   });
   assert(demoAdminLogin.statusCode === 200, 'Seeded super admin logs in');
 
@@ -275,6 +278,7 @@ async function runAuthTests() {
 
   // Reset snapshot cleanly back to baseline demo data
   db.reset();
+  seedTestUsers();
 
   console.log('\n=============================================================');
   console.log(`📊 Auth Suite Summary: ${passed} Passed, ${failed} Failed`);

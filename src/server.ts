@@ -23,6 +23,7 @@ import { customerAuthRoutes } from './routes/marketplace/auth.routes.js';
 
 import { adminAuthRoutes } from './routes/admin/auth.routes.js';
 import { adminTenantRoutes } from './routes/admin/tenant.routes.js';
+import { adminUsageRoutes } from './routes/admin/usage.routes.js';
 import { adminAnalyticsRoutes } from './routes/admin/analytics.routes.js';
 import { adminAuditRoutes } from './routes/admin/audit.routes.js';
 import { adminTelemetryRoutes } from './routes/admin/telemetry.routes.js';
@@ -42,7 +43,7 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
     origin: true, // Allow frontend dashboards (3000, 3001, 3002, etc.)
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'x-idempotency-key']
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'x-idempotency-key', 'x-try-on-token']
   });
 
   // JWT Plugin
@@ -108,6 +109,7 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
   if (domain === 'admin' || domain === 'all') {
     app.register(adminAuthRoutes);
     app.register(adminTenantRoutes);
+    app.register(adminUsageRoutes);
     app.register(adminAnalyticsRoutes);
     app.register(adminAuditRoutes);
     app.register(adminTelemetryRoutes);

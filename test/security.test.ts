@@ -1,3 +1,5 @@
+import './setup_env.js';
+import { seedTestUsers } from './helpers.js';
 import { createApp } from '../src/server.js';
 import { db } from '../src/infrastructure/database.js';
 import { requiresSslConnection } from '../src/infrastructure/prisma.js';
@@ -8,6 +10,7 @@ const app = createApp('all');
 
 async function runSecurityTests() {
   db.reset();
+  seedTestUsers();
   console.log('\n=============================================================');
   console.log('🛡️  Running Security, Vulnerability & Infrastructure Tests');
   console.log('=============================================================\n');
@@ -49,21 +52,21 @@ async function runSecurityTests() {
   const custLogin = await app.inject({
     method: 'POST',
     url: '/api/v1/marketplace/auth/login',
-    payload: { email: 'sarah.miller@example.com', password: 'password123' },
+    payload: { email: 'sarah.miller@example.com', password: 'Test-Customer-Pass-1' },
   });
   const custToken = JSON.parse(custLogin.body).token;
 
   const brandLogin = await app.inject({
     method: 'POST',
     url: '/api/v1/auth/login',
-    payload: { email: 'elena@auraatelier.com', password: 'Aura@123456' },
+    payload: { email: 'elena@auraatelier.com', password: 'Test-Brand-Pass-1' },
   });
   const brandToken = JSON.parse(brandLogin.body).token;
 
   const adminLogin = await app.inject({
     method: 'POST',
     url: '/api/v1/admin/auth/login',
-    payload: { email: 'admin@vton-platform.io', password: 'Admin@123456' },
+    payload: { email: 'admin@vton-platform.io', password: 'Test-Admin-Pass-1' },
   });
   const adminToken = JSON.parse(adminLogin.body).token;
 
@@ -188,6 +191,7 @@ async function runSecurityTests() {
   assert(lockedOut, 'Repeated invalid OTP attempts trigger 429 lockout and token invalidation');
 
   db.reset();
+  seedTestUsers();
 
   console.log('\n=============================================================');
   console.log(`📊 Security Suite Summary: ${passed} Passed, ${failed} Failed`);

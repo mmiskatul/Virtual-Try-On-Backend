@@ -13,6 +13,7 @@
     "test:auth": "tsx test/auth.test.ts",
     "test:security": "tsx test/security.test.ts",
     "test:prisma": "tsx test/prisma.test.ts",
+    "test:quota": "tsx test/tenant_quota.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push",

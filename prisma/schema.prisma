@@ -25,6 +25,7 @@ model Tenant {
   fabrics            Fabric[]
   subscription       Subscription?
   orders             Order[]
+  generationJobs     GenerationJob[]
 
   @@map("tenants")
 }
@@ -187,4 +188,41 @@ model AuthToken {
   @@index([email])
   @@index([tokenHash])
   @@map("auth_tokens")
+}
+
+// 10. Generation Jobs Table (one row per try-on request, scoped to a tenant)
+model GenerationJob {
+  id              String  @id @db.VarChar(64)
+  tenantId        String  @map("tenant_id") @db.VarChar(64)
+  tenant          Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  productId       String  @map("product_id") @db.VarChar(64)
+  category        String  @db.VarChar(64)
+  status          String  @default("QUEUED") @db.VarChar(32)
+  accessTokenHash String  @map("access_token_hash") @db.VarChar(128)
+  idempotencyKey  String? @map("idempotency_key") @db.VarChar(128)
+  providerJobId   String? @map("provider_job_id") @db.VarChar(128)
+  errorCode       String? @map("error_code") @db.VarChar(64)
+  createdAt       BigInt  @map("created_at")
+  updatedAt       BigInt  @map("updated_at")
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId])
+  @@index([providerJobId])
+  @@map("generation_jobs")
+}
+
+// 11. Usage Ledger (one entry per generation; unique generation_id prevents double charging)
+model UsageLedger {
+  id            String @id @db.VarChar(64)
+  generationId  String @unique @map("generation_id") @db.VarChar(64)
+  tenantId      String @map("tenant_id") @db.VarChar(64)
+  billingPeriod String @map("billing_period") @db.VarChar(16)
+  reservedUnits Int    @map("reserved_units")
+  finalUnits    Int?   @map("final_units")
+  status        String @default("RESERVED") @db.VarChar(32)
+  createdAt     BigInt @map("created_at")
+  updatedAt     BigInt @map("updated_at")
+
+  @@index([tenantId, billingPeriod])
+  @@map("usage_ledger")
 }

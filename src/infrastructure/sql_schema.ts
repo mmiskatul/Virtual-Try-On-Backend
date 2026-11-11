@@ -157,4 +157,36 @@ CREATE TABLE IF NOT EXISTS auth_tokens (
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_user_id ON auth_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_email ON auth_tokens(email);
 CREATE INDEX IF NOT EXISTS idx_auth_tokens_hash ON auth_tokens(token_hash);
+
+-- 10. Generation Jobs Table
+CREATE TABLE IF NOT EXISTS generation_jobs (
+  id VARCHAR(64) PRIMARY KEY,
+  tenant_id VARCHAR(64) NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  product_id VARCHAR(64) NOT NULL,
+  category VARCHAR(64) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'QUEUED',
+  access_token_hash VARCHAR(128) NOT NULL,
+  idempotency_key VARCHAR(128),
+  provider_job_id VARCHAR(128),
+  error_code VARCHAR(64),
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL,
+  UNIQUE (tenant_id, idempotency_key)
+);
+CREATE INDEX IF NOT EXISTS idx_generation_jobs_tenant ON generation_jobs(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_generation_jobs_provider ON generation_jobs(provider_job_id);
+
+-- 11. Usage Ledger Table (unique generation_id = no double charging)
+CREATE TABLE IF NOT EXISTS usage_ledger (
+  id VARCHAR(64) PRIMARY KEY,
+  generation_id VARCHAR(64) NOT NULL UNIQUE,
+  tenant_id VARCHAR(64) NOT NULL,
+  billing_period VARCHAR(16) NOT NULL,
+  reserved_units INT NOT NULL,
+  final_units INT,
+  status VARCHAR(32) NOT NULL DEFAULT 'RESERVED',
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_usage_ledger_tenant_period ON usage_ledger(tenant_id, billing_period);
 `;

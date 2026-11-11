@@ -13,6 +13,8 @@ import {
   Subscription,
   Order,
   AuditLog,
+  GenerationJob,
+  UsageLedgerEntry,
   TenantStatus,
   UserRole,
   TryOnCategory,
@@ -489,6 +491,8 @@ export class PrismaDatabase {
     orders: Order[];
     inventoryLogs: InventoryLog[];
     auditLogs: AuditLog[];
+    generationJobs: GenerationJob[];
+    usageLedger: UsageLedgerEntry[];
   } | null> {
     if (!this.prisma || !this.connected) return null;
     const now = BigInt(Date.now());
@@ -502,6 +506,8 @@ export class PrismaDatabase {
       orderRows,
       invRows,
       auditRows,
+      genRows,
+      ledgerRows,
     ] = await Promise.all([
       this.prisma.tenant.findMany({ orderBy: { createdAt: 'asc' } }),
       this.prisma.user.findMany({ orderBy: { createdAt: 'asc' } }),
@@ -515,6 +521,8 @@ export class PrismaDatabase {
       this.prisma.order.findMany({ orderBy: { createdAt: 'desc' } }),
       this.prisma.inventoryLog.findMany({ orderBy: { timestamp: 'desc' }, take: 500 }),
       this.prisma.auditLog.findMany({ orderBy: { timestamp: 'desc' }, take: 500 }),
+      this.prisma.generationJob.findMany({ orderBy: { createdAt: 'asc' } }),
+      this.prisma.usageLedger.findMany({ orderBy: { createdAt: 'asc' } }),
     ]);
 
     return {
@@ -527,7 +535,66 @@ export class PrismaDatabase {
       orders: orderRows.map((r) => this.mapOrder(r)),
       inventoryLogs: invRows.map((r) => this.mapInventoryLog(r)),
       auditLogs: auditRows.map((r) => this.mapAuditLog(r)),
+      generationJobs: genRows.map((r: any) => ({
+        id: r.id,
+        tenantId: r.tenantId,
+        productId: r.productId,
+        category: r.category,
+        status: r.status,
+        accessTokenHash: r.accessTokenHash,
+        idempotencyKey: r.idempotencyKey ?? undefined,
+        providerJobId: r.providerJobId ?? undefined,
+        errorCode: r.errorCode ?? undefined,
+        createdAt: Number(r.createdAt),
+        updatedAt: Number(r.updatedAt),
+      })),
+      usageLedger: ledgerRows.map((r: any) => ({
+        id: r.id,
+        generationId: r.generationId,
+        tenantId: r.tenantId,
+        billingPeriod: r.billingPeriod,
+        reservedUnits: r.reservedUnits,
+        finalUnits: r.finalUnits ?? undefined,
+        status: r.status,
+        createdAt: Number(r.createdAt),
+        updatedAt: Number(r.updatedAt),
+      })),
     };
+  }
+
+  public async saveGeneration(job: GenerationJob, entry: UsageLedgerEntry, sub: Subscription): Promise<void> {
+    if (!this.prisma || !this.connected) return;
+    await this.prisma.$transaction([
+      this.prisma.generationJob.upsert({
+        where: { id: job.id },
+        create: {
+          id: job.id, tenantId: job.tenantId, productId: job.productId, category: job.category,
+          status: job.status, accessTokenHash: job.accessTokenHash, idempotencyKey: job.idempotencyKey ?? null,
+          providerJobId: job.providerJobId ?? null, errorCode: job.errorCode ?? null,
+          createdAt: BigInt(job.createdAt), updatedAt: BigInt(job.updatedAt),
+        },
+        update: {
+          status: job.status, providerJobId: job.providerJobId ?? null,
+          errorCode: job.errorCode ?? null, updatedAt: BigInt(job.updatedAt),
+        },
+      }),
+      this.prisma.usageLedger.upsert({
+        where: { generationId: entry.generationId },
+        create: {
+          id: entry.id, generationId: entry.generationId, tenantId: entry.tenantId,
+          billingPeriod: entry.billingPeriod, reservedUnits: entry.reservedUnits,
+          finalUnits: entry.finalUnits ?? null, status: entry.status,
+          createdAt: BigInt(entry.createdAt), updatedAt: BigInt(entry.updatedAt),
+        },
+        update: {
+          finalUnits: entry.finalUnits ?? null, status: entry.status, updatedAt: BigInt(entry.updatedAt),
+        },
+      }),
+      this.prisma.subscription.updateMany({
+        where: { tenantId: sub.tenantId },
+        data: { tryOnUsed: sub.tryOnUsed, updatedAt: BigInt(sub.updatedAt) },
+      }),
+    ]);
   }
 
   public async getTableCounts(): Promise<Record<string, number> | null> {
@@ -759,6 +826,20 @@ export class PrismaDatabase {
       where: { tenantId },
     });
     return row ? this.mapSubscription(row) : undefined;
+  }
+
+  public async updateSubscription(tenantId: string, sub: Subscription): Promise<void> {
+    if (!this.prisma) return;
+    await this.prisma.subscription.updateMany({
+      where: { tenantId },
+      data: {
+        plan: sub.plan,
+        productLimit: sub.productLimit,
+        tryOnMonthlyQuota: sub.tryOnMonthlyQuota,
+        status: sub.status,
+        updatedAt: BigInt(sub.updatedAt),
+      },
+    });
   }
 
   public async recordTryOnUsage(tenantId: string): Promise<void> {

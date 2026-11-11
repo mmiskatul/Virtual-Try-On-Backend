@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {
   Tenant, User, AuthToken, AuthTokenType, Product, Fabric, InventoryLog,
-  Subscription, Order, AuditLog
+  Subscription, Order, AuditLog, GenerationJob, UsageLedgerEntry, GenerationStatus
 } from '../domain/types.js';
 import { config } from './config.js';
 import { NeonSqlDatabase } from './neon_database.js';
@@ -19,6 +19,8 @@ export interface DatabaseCollections {
   subscriptions: Subscription[];
   orders: Order[];
   auditLogs: AuditLog[];
+  generationJobs: GenerationJob[];
+  usageLedger: UsageLedgerEntry[];
 }
 
 export class Database {
@@ -31,7 +33,9 @@ export class Database {
     inventoryLogs: [],
     subscriptions: [],
     orders: [],
-    auditLogs: []
+    auditLogs: [],
+    generationJobs: [],
+    usageLedger: []
   };
 
   private snapshotPath: string;
@@ -101,7 +105,10 @@ export class Database {
           orders: hydrated.orders,
           inventoryLogs: hydrated.inventoryLogs,
           auditLogs: hydrated.auditLogs,
+          generationJobs: hydrated.generationJobs,
+          usageLedger: hydrated.usageLedger,
         };
+        this.applySeedPasswordsFromEnv();
         this.save();
         console.log(
           `[Database] Hydrated ${hydrated.tenants.length} tenants, ${hydrated.users.length} users, ${hydrated.products.length} products from ${this.getDatabaseProviderLabel()}.`
@@ -229,6 +236,8 @@ export class Database {
         this.data = JSON.parse(raw);
         if (!this.data.auditLogs) this.data.auditLogs = [];
         if (!this.data.authTokens) this.data.authTokens = [];
+        if (!this.data.generationJobs) this.data.generationJobs = [];
+        if (!this.data.usageLedger) this.data.usageLedger = [];
 
         // Migrate legacy snapshot users that predate emailVerified tracking
         let migrated = false;
@@ -239,21 +248,8 @@ export class Database {
             migrated = true;
           }
         }
-        if (!this.data.users.some((u) => u.email.toLowerCase() === 'sarah.miller@example.com')) {
-          const now = Date.now();
-          this.data.users.push({
-            id: 'user_customer_sarah',
-            name: 'Sarah Miller',
-            email: 'sarah.miller@example.com',
-            passwordHash: this.hashPassword('password123'),
-            role: 'CUSTOMER',
-            emailVerified: true,
-            emailVerifiedAt: now,
-            createdAt: now
-          });
-          migrated = true;
-        }
         if (migrated) this.save();
+        this.applySeedPasswordsFromEnv();
       } else {
         this.seedDemoData();
         this.save();
@@ -276,6 +272,47 @@ export class Database {
     this.skipAsyncHydration = true;
     this.otpFailedAttempts.clear();
     this.seedDemoData();
+    this.data.generationJobs = [];
+    this.data.usageLedger = [];
+    this.save();
+  }
+
+  private seedPasswordCache: string | null = null;
+
+  /**
+   * Only the platform super admin is seeded. Its password comes from SEED_ADMIN_PASSWORD (.env);
+   * if unset, a random one is generated and printed once. Shops and customers register themselves.
+   */
+  private seedAdminPassword(): string {
+    const fromEnv = process.env.SEED_ADMIN_PASSWORD;
+    if (fromEnv && fromEnv.length >= 8) return fromEnv;
+    if (this.seedPasswordCache) return this.seedPasswordCache;
+    this.seedPasswordCache = crypto.randomBytes(12).toString('base64url');
+    console.warn(`[Seed] SEED_ADMIN_PASSWORD not set. Generated one-time super admin password: ${this.seedPasswordCache}  (set SEED_ADMIN_PASSWORD in .env to choose your own)`);
+    return this.seedPasswordCache;
+  }
+
+  /** .env is the source of truth for the super admin password: existing admin account is synced at startup. */
+  private applySeedPasswordsFromEnv(): void {
+    if (process.env.NODE_ENV === 'test') return; // tests must never rewrite real database users
+    const user = this.data.users.find(u => u.id === 'user_admin');
+    if (!user) return;
+    const updates: Partial<User> = {};
+
+    const email = (process.env.SEED_ADMIN_EMAIL || '').trim().toLowerCase();
+    if (email && email !== user.email && !this.data.users.some(u => u.id !== user.id && u.email === email)) {
+      updates.email = email;
+    }
+    const wanted = process.env.SEED_ADMIN_PASSWORD;
+    if (wanted && wanted.length >= 8 && !this.verifyPassword(wanted, user.passwordHash)) {
+      updates.passwordHash = this.hashPassword(wanted);
+    }
+    if (Object.keys(updates).length === 0) return;
+
+    Object.assign(user, updates, { updatedAt: Date.now() });
+    this.enqueuePrismaSync(async (prisma) => {
+      await prisma.updateUser(user.id, updates);
+    });
     this.save();
   }
 
@@ -386,61 +423,15 @@ export class Database {
     const superAdmin: User = {
       id: 'user_admin',
       name: 'Platform Super Admin',
-      email: 'admin@vton-platform.io',
-      passwordHash: this.hashPassword('Admin@123456'),
+      email: (process.env.SEED_ADMIN_EMAIL || 'admin@vton-platform.io').trim().toLowerCase(),
+      passwordHash: this.hashPassword(this.seedAdminPassword()),
       role: 'SUPER_ADMIN',
       emailVerified: true,
       emailVerifiedAt: now,
       createdAt: now
     };
 
-    const brandOwner1: User = {
-      id: 'user_aura_owner',
-      tenantId: 'tenant_aura',
-      name: 'Elena Rostova',
-      email: 'elena@auraatelier.com',
-      passwordHash: this.hashPassword('Aura@123456'),
-      role: 'BRAND_OWNER',
-      emailVerified: true,
-      emailVerifiedAt: now,
-      createdAt: now
-    };
-
-    const brandOwner2: User = {
-      id: 'user_vogue_owner',
-      tenantId: 'tenant_vogue',
-      name: 'Marcus Sterling',
-      email: 'marcus@voguenova.com',
-      passwordHash: this.hashPassword('Vogue@123456'),
-      role: 'BRAND_OWNER',
-      emailVerified: true,
-      emailVerifiedAt: now,
-      createdAt: now
-    };
-
-    const customerUser: User = {
-      id: 'user_customer_demo',
-      name: 'Sophia Chen',
-      email: 'sophia@example.com',
-      passwordHash: this.hashPassword('Customer@123456'),
-      role: 'CUSTOMER',
-      emailVerified: true,
-      emailVerifiedAt: now,
-      createdAt: now
-    };
-
-    const customerSarah: User = {
-      id: 'user_customer_sarah',
-      name: 'Sarah Miller',
-      email: 'sarah.miller@example.com',
-      passwordHash: this.hashPassword('password123'),
-      role: 'CUSTOMER',
-      emailVerified: true,
-      emailVerifiedAt: now,
-      createdAt: now
-    };
-
-    this.data.users = [superAdmin, brandOwner1, brandOwner2, customerUser, customerSarah];
+    this.data.users = [superAdmin]; // shops and customers register their own accounts
     this.data.authTokens = [];
 
     // 3. Seed Fabrics
@@ -1061,6 +1052,28 @@ export class Database {
     return this.data.subscriptions.find(s => s.tenantId === tenantId);
   }
 
+  public updateSubscription(
+    tenantId: string,
+    updates: Partial<Pick<Subscription, 'plan' | 'productLimit' | 'tryOnMonthlyQuota' | 'status'>>
+  ): Subscription | undefined {
+    const sub = this.data.subscriptions.find(s => s.tenantId === tenantId);
+    if (!sub) return undefined;
+    Object.assign(sub, updates, { updatedAt: Date.now() });
+    this.save();
+    this.enqueuePrismaSync(async (prisma) => {
+      await prisma.updateSubscription(tenantId, sub);
+    });
+    return sub;
+  }
+
+  public getAllGenerations(): GenerationJob[] {
+    return this.data.generationJobs;
+  }
+
+  public getAllUsageLedger(): UsageLedgerEntry[] {
+    return this.data.usageLedger;
+  }
+
   public recordTryOnUsage(tenantId: string): void {
     const sub = this.data.subscriptions.find(s => s.tenantId === tenantId);
     if (sub) {
@@ -1073,6 +1086,142 @@ export class Database {
         });
       }
     }
+  }
+
+  // --- Generation jobs & usage ledger (quota reservation) ---
+  private billingPeriod(ts = Date.now()): string {
+    return new Date(ts).toISOString().slice(0, 7);
+  }
+
+  /**
+   * Atomically checks quota and creates a generation job + ledger entry.
+   * Fully synchronous: on Node's single thread two concurrent requests can never both
+   * pass the quota check (no await between check and write).
+   * tenantId MUST come from a server-side lookup (product -> tenant), never from the client.
+   */
+  public reserveGeneration(params: {
+    tenantId: string;
+    productId: string;
+    category: string;
+    idempotencyKey?: string;
+  }):
+    | { ok: true; job: GenerationJob; accessToken?: string; duplicate: boolean }
+    | { ok: false; error: 'QUOTA_EXHAUSTED' | 'NO_SUBSCRIPTION' | 'SUBSCRIPTION_INACTIVE' } {
+    const { tenantId, productId, category, idempotencyKey } = params;
+
+    if (idempotencyKey) {
+      const existing = this.data.generationJobs.find(
+        j => j.tenantId === tenantId && j.idempotencyKey === idempotencyKey
+      );
+      if (existing) return { ok: true, job: existing, duplicate: true };
+    }
+
+    const sub = this.data.subscriptions.find(s => s.tenantId === tenantId);
+    if (!sub) return { ok: false, error: 'NO_SUBSCRIPTION' };
+    if (sub.status !== 'ACTIVE') return { ok: false, error: 'SUBSCRIPTION_INACTIVE' };
+    if (sub.tryOnUsed >= sub.tryOnMonthlyQuota) return { ok: false, error: 'QUOTA_EXHAUSTED' };
+
+    const now = Date.now();
+    const generationId = `gen_${now}_${crypto.randomBytes(5).toString('hex')}`;
+    const accessToken = crypto.randomBytes(24).toString('hex');
+    const job: GenerationJob = {
+      id: generationId,
+      tenantId,
+      productId,
+      category,
+      status: 'QUEUED',
+      accessTokenHash: this.hashToken(accessToken),
+      idempotencyKey,
+      createdAt: now,
+      updatedAt: now
+    };
+    const entry: UsageLedgerEntry = {
+      id: `led_${generationId}`,
+      generationId,
+      tenantId,
+      billingPeriod: this.billingPeriod(now),
+      reservedUnits: 1,
+      status: 'RESERVED',
+      createdAt: now,
+      updatedAt: now
+    };
+    sub.tryOnUsed += 1;
+    sub.updatedAt = now;
+    this.data.generationJobs.push(job);
+    this.data.usageLedger.push(entry);
+    this.save();
+    this.syncGeneration(job, entry, sub);
+    return { ok: true, job, accessToken, duplicate: false };
+  }
+
+  private syncGeneration(job: GenerationJob, entry: UsageLedgerEntry, sub: Subscription): void {
+    this.enqueuePrismaSync(async (prisma) => {
+      await prisma.saveGeneration(job, entry, sub);
+    });
+  }
+
+  public attachProviderJob(generationId: string, providerJobId: string): void {
+    const job = this.data.generationJobs.find(j => j.id === generationId);
+    const entry = this.data.usageLedger.find(l => l.generationId === generationId);
+    const sub = job && this.data.subscriptions.find(s => s.tenantId === job.tenantId);
+    if (!job || !entry || !sub) return;
+    job.providerJobId = providerJobId;
+    if (job.status === 'QUEUED') job.status = 'PROCESSING';
+    job.updatedAt = Date.now();
+    this.save();
+    this.syncGeneration(job, entry, sub);
+  }
+
+  /**
+   * Moves a job to a terminal state exactly once. Success consumes the reserved unit;
+   * failure releases it back to the shop. Repeated calls (duplicate polls/deliveries) are no-ops.
+   */
+  public finalizeGeneration(
+    generationId: string,
+    outcome: Extract<GenerationStatus, 'COMPLETED' | 'FAILED'>,
+    errorCode?: string
+  ): void {
+    const job = this.data.generationJobs.find(j => j.id === generationId);
+    const entry = this.data.usageLedger.find(l => l.generationId === generationId);
+    const sub = job && this.data.subscriptions.find(s => s.tenantId === job.tenantId);
+    if (!job || !entry || !sub) return;
+    if (entry.status !== 'RESERVED') return; // already finalized -> idempotent
+
+    const now = Date.now();
+    job.status = outcome;
+    job.errorCode = outcome === 'FAILED' ? (errorCode || 'GENERATION_FAILED') : undefined;
+    job.updatedAt = now;
+    entry.updatedAt = now;
+    if (outcome === 'COMPLETED') {
+      entry.status = 'CONSUMED';
+      entry.finalUnits = 1;
+    } else {
+      entry.status = 'RELEASED';
+      entry.finalUnits = 0;
+      sub.tryOnUsed = Math.max(0, sub.tryOnUsed - 1);
+      sub.updatedAt = now;
+    }
+    this.save();
+    this.syncGeneration(job, entry, sub);
+  }
+
+  /** Returns the job only if the caller holds the access token issued to the originating session. */
+  public getGenerationForSession(jobId: string, accessToken: string | undefined): GenerationJob | undefined {
+    if (!accessToken) return undefined;
+    const job = this.data.generationJobs.find(j => j.providerJobId === jobId || j.id === jobId);
+    if (!job) return undefined;
+    const given = Buffer.from(this.hashToken(accessToken));
+    const stored = Buffer.from(job.accessTokenHash);
+    if (given.length !== stored.length || !crypto.timingSafeEqual(given, stored)) return undefined;
+    return job;
+  }
+
+  public getGenerationsByTenant(tenantId: string): GenerationJob[] {
+    return this.data.generationJobs.filter(j => j.tenantId === tenantId);
+  }
+
+  public getUsageLedger(tenantId: string): UsageLedgerEntry[] {
+    return this.data.usageLedger.filter(l => l.tenantId === tenantId);
   }
 
   // --- Audit Logs ---
