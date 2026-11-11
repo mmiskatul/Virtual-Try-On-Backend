@@ -1,11 +1,12 @@
-import nodemailer, { Transporter } from 'nodemailer';
+import { Resend } from 'resend';
 import { config } from './config.js';
 import { AuthPortal } from '../domain/types.js';
 
 export interface EmailSendResult {
   delivered: boolean;
   error?: string;
-  provider: 'resend' | 'smtp' | 'dev-preview';
+  provider: 'resend' | 'dev-preview';
+  messageId?: string;
   preview?: {
     actionUrl?: string;
     otpCode?: string;
@@ -23,6 +24,11 @@ interface BaseMailPayload {
     otpCode?: string;
     expiresInMinutes?: number;
   };
+}
+
+export interface ResendOverrideOptions {
+  apiKey?: string;
+  from?: string;
 }
 
 function escapeHtml(input: string): string {
@@ -81,50 +87,21 @@ function getPortalMeta(portal: AuthPortal, requestOrigin?: string): { title: str
   }
 }
 
-export interface SmtpOverrideOptions {
-  host?: string;
-  port?: number;
-  secure?: boolean;
-  user?: string;
-  pass?: string;
-  from?: string;
-}
-
 class EmailService {
-  private smtpTransporter: Transporter | null = null;
+  private resendClient: Resend | null = null;
+  private cachedKey = '';
 
   public hasRealTransport(): boolean {
-    return Boolean(config.smtpHost) || this.hasResend();
-  }
-
-  private hasResend(): boolean {
     return Boolean(config.resendApiKey) && process.env.NODE_ENV !== 'test';
   }
 
-  private async sendViaResend(payload: BaseMailPayload): Promise<void> {
-    const res = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${config.resendApiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: config.resendFrom, to: [payload.to], subject: payload.subject, html: payload.html, text: payload.text }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!res.ok) throw new Error(`Resend API ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  }
-
-  public getActiveTransport(): 'smtp' | 'dev-preview' {
-    if (config.smtpHost) return 'smtp';
-    return 'dev-preview';
+  public getActiveTransport(): 'resend' | 'dev-preview' {
+    return this.hasRealTransport() ? 'resend' : 'dev-preview';
   }
 
   public reloadTransport(): void {
-    if (this.smtpTransporter) {
-      try {
-        this.smtpTransporter.close();
-      } catch {
-        // Ignore transporter close errors
-      }
-      this.smtpTransporter = null;
-    }
+    this.resendClient = null;
+    this.cachedKey = '';
   }
 
   public isDevPreviewAllowed(): boolean {
@@ -135,163 +112,143 @@ class EmailService {
     return getPortalMeta(portal).baseUrl;
   }
 
-  private createSmtpTransporter(override?: SmtpOverrideOptions): Transporter | null {
-    const host = (override?.host ?? config.smtpHost).trim();
-    if (!host) return null;
-
-    const port = Number(override?.port ?? config.smtpPort ?? 587);
-    const secure = override?.secure !== undefined ? Boolean(override.secure) : port === 465 || config.smtpSecure;
-    const user = (override?.user ?? config.smtpUser).trim();
-    const pass = override?.pass !== undefined && override.pass !== '' ? override.pass : config.smtpPass;
-
-    return nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      connectionTimeout: 10000,
-      greetingTimeout: 10000,
-      socketTimeout: 15000,
-      auth: user
-        ? {
-            user,
-            pass,
-          }
-        : undefined,
-    });
-  }
-
-  private getSmtpTransporter(): Transporter | null {
-    if (!config.smtpHost) return null;
-    if (!this.smtpTransporter) {
-      this.smtpTransporter = this.createSmtpTransporter();
+  private getClient(apiKeyOverride?: string): Resend | null {
+    const key = (apiKeyOverride ?? config.resendApiKey).trim();
+    if (!key) return null;
+    if (apiKeyOverride) return new Resend(key);
+    if (!this.resendClient || this.cachedKey !== key) {
+      this.resendClient = new Resend(key);
+      this.cachedKey = key;
     }
-    return this.smtpTransporter;
+    return this.resendClient;
   }
 
-  public async verifySmtpConnection(override?: SmtpOverrideOptions): Promise<{
+  public async verifyResendConnection(override?: ResendOverrideOptions): Promise<{
     success: boolean;
     message: string;
     latencyMs: number;
   }> {
-    const transporter = override?.host ? this.createSmtpTransporter(override) : this.getSmtpTransporter();
-    if (!transporter) {
+    const client = this.getClient(override?.apiKey);
+    if (!client) {
       return {
         success: false,
         latencyMs: 0,
-        message: 'SMTP host is not configured.',
+        message: 'RESEND_API_KEY is not configured.',
       };
     }
 
     const start = performance.now();
     try {
-      await transporter.verify();
+      const { error } = await client.domains.list();
       const latencyMs = Number((performance.now() - start).toFixed(1));
-      if (override?.host) transporter.close();
+      if (error) {
+        return {
+          success: false,
+          latencyMs,
+          message: `Resend API verification failed: ${error.message}`,
+        };
+      }
       return {
         success: true,
         latencyMs,
-        message: `SMTP connection verified successfully (${latencyMs}ms). Ready to deliver verification and reset emails.`,
+        message: `Resend API key verified (${latencyMs}ms). Ready to send verification and reset emails.`,
       };
     } catch (err: any) {
       const latencyMs = Number((performance.now() - start).toFixed(1));
-      if (override?.host) transporter.close();
       return {
         success: false,
         latencyMs,
-        message: `SMTP handshake failed: ${err?.message || 'Connection error'}`,
+        message: `Resend API check failed: ${err?.message || 'Network error'}`,
       };
     }
   }
 
-  public async sendTestEmail(to: string, override?: SmtpOverrideOptions): Promise<{
+  public async sendTestEmail(
+    to: string,
+    override?: ResendOverrideOptions
+  ): Promise<{
     success: boolean;
-    provider: 'smtp' | 'resend' | 'dev-preview';
+    provider: 'resend' | 'dev-preview';
     messageId?: string;
     message: string;
   }> {
-    const transporter = override?.host ? this.createSmtpTransporter(override) : this.getSmtpTransporter();
-    const fromAddr = (override?.from ?? config.emailFrom).trim() || 'V-TRY Studio <noreply@v-try.fashion>';
+    const client = this.getClient(override?.apiKey);
+    const fromAddr = (override?.from ?? config.resendFrom).trim() || 'V-TRY Studio <onboarding@resend.dev>';
 
-    if (transporter) {
-      try {
-        const info = await transporter.sendMail({
-          from: fromAddr,
-          to,
-          subject: 'V-TRY Platform — SMTP Email Delivery Test',
-          html: `
-            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; background: #0f172a; color: #e2e8f0; border-radius: 16px; padding: 28px; border: 1px solid #1e293b;">
-              <div style="font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #f59e0b; font-weight: 700; margin-bottom: 10px;">V-TRY Platform Infrastructure</div>
-              <h2 style="color: #ffffff; margin: 0 0 10px;">SMTP Test Successful</h2>
-              <p style="font-size: 13px; color: #94a3b8; line-height: 1.6; margin: 0;">
-                Your SMTP mail transport is configured and working properly for account verification and password recovery emails.
-              </p>
-            </div>
-          `,
-          text: 'V-TRY Platform SMTP Test Successful — Your email delivery pipeline is working properly.',
-        });
-        if (override?.host) transporter.close();
-        return {
-          success: true,
-          provider: 'smtp',
-          messageId: info.messageId,
-          message: `Test email sent via SMTP to ${to} (Message ID: ${info.messageId}).`,
-        };
-      } catch (err: any) {
-        if (override?.host) transporter.close();
-        return {
-          success: false,
-          provider: 'smtp',
-          message: `Failed to send test email via SMTP: ${err?.message || 'Unknown error'}`,
-        };
-      }
+    if (!client) {
+      return {
+        success: false,
+        provider: 'dev-preview',
+        message: 'RESEND_API_KEY is not configured. Add your Resend API key to test live email delivery.',
+      };
     }
 
-    return {
-      success: false,
-      provider: 'dev-preview',
-      message: 'No SMTP host configured. Enter SMTP details to test live email delivery.',
-    };
+    try {
+      const { data, error } = await client.emails.send({
+        from: fromAddr,
+        to: [to],
+        subject: 'V-TRY Platform — Resend Email Delivery Test',
+        html: `
+          <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 520px; margin: 0 auto; background: #0f172a; color: #e2e8f0; border-radius: 16px; padding: 28px; border: 1px solid #1e293b;">
+            <div style="font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #f59e0b; font-weight: 700; margin-bottom: 10px;">V-TRY Platform Infrastructure</div>
+            <h2 style="color: #ffffff; margin: 0 0 10px;">Resend Test Successful</h2>
+            <p style="font-size: 13px; color: #94a3b8; line-height: 1.6; margin: 0;">
+              Your Resend transactional email pipeline is configured and ready for verification codes and password recovery.
+            </p>
+          </div>
+        `,
+        text: 'V-TRY Platform Resend Test Successful — Your transactional email pipeline is working properly.',
+      });
+
+      if (error) {
+        return {
+          success: false,
+          provider: 'resend',
+          message: `Resend API error: ${error.message}`,
+        };
+      }
+
+      return {
+        success: true,
+        provider: 'resend',
+        messageId: data?.id,
+        message: `Test email sent via Resend to ${to} (ID: ${data?.id || 'sent'}).`,
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        provider: 'resend',
+        message: `Failed to send test email via Resend: ${err?.message || 'Unknown error'}`,
+      };
+    }
   }
 
   private async dispatch(payload: BaseMailPayload): Promise<EmailSendResult> {
-    let lastError = '';
-
-    // 1. Resend HTTPS API (works on hosts that block outbound SMTP ports)
-    if (this.hasResend()) {
-      try {
-        await this.sendViaResend(payload);
-        return { delivered: true, provider: 'resend' };
-      } catch (err: any) {
-        lastError = `Resend: ${err?.message || err}`;
-        console.error('[EmailService] Resend dispatch error:', lastError);
-      }
-    }
-
-    // 2. Nodemailer SMTP (when SMTP_HOST is configured)
-    const transporter = this.getSmtpTransporter();
-    if (transporter) {
-      try {
-        await transporter.sendMail({
-          from: config.emailFrom,
-          to: payload.to,
-          subject: payload.subject,
-          html: payload.html,
-          text: payload.text,
-        });
-        return { delivered: true, provider: 'smtp' };
-      } catch (err: any) {
-        lastError = `SMTP: ${err?.message || err}`;
-        console.error('[EmailService] SMTP dispatch error:', lastError);
-        this.reloadTransport();
-      }
-    }
-
-    // A real transport is configured but failed: report it honestly, never pretend it was sent.
     if (this.hasRealTransport()) {
-      return { delivered: false, provider: transporter ? 'smtp' : 'resend', error: lastError };
+      const client = this.getClient();
+      if (client) {
+        try {
+          const { data, error } = await client.emails.send({
+            from: config.resendFrom,
+            to: [payload.to],
+            subject: payload.subject,
+            html: payload.html,
+            text: payload.text,
+          });
+          if (error) {
+            console.error('[EmailService] Resend dispatch error:', error.message);
+            return { delivered: false, provider: 'resend', error: error.message };
+          }
+          return { delivered: true, provider: 'resend', messageId: data?.id };
+        } catch (err: any) {
+          const msg = err?.message || String(err);
+          console.error('[EmailService] Resend dispatch exception:', msg);
+          return { delivered: false, provider: 'resend', error: msg };
+        }
+      }
     }
 
-    // 3. Development Preview Fallback (no transport configured)
+    // Development Preview Fallback (when RESEND_API_KEY is unset or NODE_ENV === 'test')
     console.log('\n================ [EmailService - Dev Preview] ================');
     console.log(`To:      ${payload.to}`);
     console.log(`Subject: ${payload.subject}`);

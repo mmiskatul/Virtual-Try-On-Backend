@@ -1,6 +1,8 @@
+import './setup_env.js';
 import { describe, expect, it } from 'vitest';
 import { createApp } from '../src/server.js';
 import { getValidatedEnv } from '../src/infrastructure/env.schema.js';
+import { emailService } from '../src/infrastructure/email.service.js';
 import { okResponse, paginatedResponse } from '../src/infrastructure/http.js';
 import { redisAdapter } from '../src/infrastructure/redis.js';
 import { storageAdapter, signStorageToken, verifyStorageToken } from '../src/infrastructure/storage.adapter.js';
@@ -16,6 +18,8 @@ describe('Phase 1: Backend Foundation & Storage/OpenAPI Contracts', () => {
     const env = getValidatedEnv();
     expect(env.PORT).toBeGreaterThan(0);
     expect(env.JWT_SECRET.length).toBeGreaterThanOrEqual(16);
+    expect(env.RESEND_FROM).toContain('@');
+    expect(emailService.getActiveTransport()).toBe('dev-preview');
   });
 
   it('builds consistent API response envelopes with meta.requestId', () => {

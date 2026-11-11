@@ -66,7 +66,10 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
     ]
   });
 
-  // JWT Plugin
+  // JWT Plugin (fail closed when JWT_SECRET is absent)
+  if (!config.jwtSecret || config.jwtSecret.length < 16) {
+    throw new Error('Missing or weak JWT_SECRET. Configure a >= 16 char JWT_SECRET in backend/.env.');
+  }
   app.register(jwt, {
     secret: config.jwtSecret
   });

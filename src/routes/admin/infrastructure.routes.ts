@@ -36,23 +36,19 @@ function isValidPostgresUri(uri: string): boolean {
 }
 
 export async function adminInfrastructureRoutes(app: FastifyInstance) {
-  // 1. Read Masked SMTP + Supabase / Database Configuration
+  // 1. Read Masked Resend Email + Supabase / Database Configuration
   app.get('/api/v1/admin/infrastructure/config', { preHandler: adminGuards }, async () => {
     const prisma = db.getPrisma();
     const counts = prisma && prisma.isConnected() ? await prisma.getTableCounts().catch(() => null) : null;
     const health = prisma && prisma.isConnected() ? await prisma.checkHealth().catch(() => null) : null;
 
     return {
-      smtp: {
+      resend: {
         activeTransport: emailService.getActiveTransport(),
         configured: emailService.hasRealTransport(),
-        host: config.smtpHost || '',
-        port: config.smtpPort || 587,
-        secure: config.smtpSecure,
-        user: config.smtpUser || '',
-        hasPass: Boolean(config.smtpPass),
-        maskedPass: maskSecret(config.smtpPass),
-        from: config.emailFrom || 'V-TRY Studio <noreply@v-try.fashion>',
+        hasApiKey: Boolean(config.resendApiKey),
+        maskedApiKey: maskSecret(config.resendApiKey),
+        from: config.resendFrom || 'V-TRY Studio <onboarding@resend.dev>',
       },
       database: {
         provider: db.getDatabaseProviderLabel(),
@@ -73,52 +69,27 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
     };
   });
 
-  // 2. Save & Live-Reload SMTP Configuration
-  app.post('/api/v1/admin/infrastructure/smtp', { preHandler: adminGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  // 2. Save & Live-Reload Resend Configuration
+  app.post('/api/v1/admin/infrastructure/resend', { preHandler: adminGuards }, async (request: FastifyRequest) => {
     const body = (request.body as any) || {};
     const envUpdates: Record<string, string> = {};
 
-    if (typeof body.host === 'string') {
-      const val = sanitizeEnvValue(body.host);
-      config.smtpHost = val;
-      process.env.SMTP_HOST = val;
-      envUpdates.SMTP_HOST = val;
+    if (typeof body.apiKey === 'string' && body.apiKey.trim() && !isMaskedPlaceholder(body.apiKey)) {
+      const val = sanitizeEnvValue(body.apiKey);
+      config.resendApiKey = val;
+      process.env.RESEND_API_KEY = val;
+      envUpdates.RESEND_API_KEY = val;
+    } else if (body.clearApiKey === true) {
+      config.resendApiKey = '';
+      process.env.RESEND_API_KEY = '';
+      envUpdates.RESEND_API_KEY = '';
     }
-    if (body.port !== undefined) {
-      const portNum = Number(body.port);
-      if (!Number.isInteger(portNum) || portNum < 1 || portNum > 65535) {
-        return reply.status(400).send({ error: 'ValidationError', message: 'SMTP port must be between 1 and 65535.' });
-      }
-      config.smtpPort = portNum;
-      process.env.SMTP_PORT = String(portNum);
-      envUpdates.SMTP_PORT = String(portNum);
-    }
-    if (typeof body.secure === 'boolean') {
-      config.smtpSecure = body.secure;
-      process.env.SMTP_SECURE = String(body.secure);
-      envUpdates.SMTP_SECURE = String(body.secure);
-    }
-    if (typeof body.user === 'string') {
-      const val = sanitizeEnvValue(body.user);
-      config.smtpUser = val;
-      process.env.SMTP_USER = val;
-      envUpdates.SMTP_USER = val;
-    }
-    if (typeof body.pass === 'string' && body.pass !== '' && !isMaskedPlaceholder(body.pass)) {
-      const val = sanitizeEnvValue(body.pass);
-      config.smtpPass = val;
-      process.env.SMTP_PASS = val;
-      envUpdates.SMTP_PASS = val;
-    } else if (body.clearPass === true) {
-      config.smtpPass = '';
-      process.env.SMTP_PASS = '';
-      envUpdates.SMTP_PASS = '';
-    }
+
     if (typeof body.from === 'string' && body.from.trim()) {
       const val = sanitizeEnvValue(body.from);
-      config.emailFrom = val;
-      process.env.SMTP_FROM = val;
-      envUpdates.SMTP_FROM = val;
+      config.resendFrom = val;
+      process.env.RESEND_FROM = val;
+      envUpdates.RESEND_FROM = val;
     }
 
     emailService.reloadTransport();
@@ -127,40 +98,32 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
     db.recordAuditLog({
       actorId: request.authUser!.id,
       actorRole: request.authUser!.role,
-      action: 'SMTP_CONFIG_UPDATED',
+      action: 'RESEND_CONFIG_UPDATED',
       entity: 'EmailTransport',
       details: {
         activeTransport: emailService.getActiveTransport(),
-        host: config.smtpHost,
-        port: config.smtpPort,
-        secure: config.smtpSecure,
+        from: config.resendFrom,
       },
     });
 
     return {
       success: true,
       activeTransport: emailService.getActiveTransport(),
-      message: 'SMTP email delivery configuration updated and reloaded.',
+      message: 'Resend email delivery configuration updated and reloaded.',
     };
   });
 
-  // 3. Verify SMTP Handshake OR Send Real Test Email
-  app.post('/api/v1/admin/infrastructure/smtp/test', { preHandler: adminGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  // 3. Verify Resend API Key OR Send Real Test Email
+  app.post('/api/v1/admin/infrastructure/resend/test', { preHandler: adminGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     const body = (request.body as any) || {};
     const action = body.action === 'send' ? 'send' : 'verify';
-    const override = body.host
-      ? {
-          host: sanitizeEnvValue(body.host),
-          port: body.port ? Number(body.port) : config.smtpPort,
-          secure: typeof body.secure === 'boolean' ? body.secure : config.smtpSecure,
-          user: typeof body.user === 'string' ? sanitizeEnvValue(body.user) : config.smtpUser,
-          pass:
-            typeof body.pass === 'string' && body.pass && !isMaskedPlaceholder(body.pass)
-              ? sanitizeEnvValue(body.pass)
-              : config.smtpPass,
-          from: typeof body.from === 'string' && body.from ? sanitizeEnvValue(body.from) : config.emailFrom,
-        }
-      : undefined;
+    const override = {
+      apiKey:
+        typeof body.apiKey === 'string' && body.apiKey.trim() && !isMaskedPlaceholder(body.apiKey)
+          ? sanitizeEnvValue(body.apiKey)
+          : undefined,
+      from: typeof body.from === 'string' && body.from.trim() ? sanitizeEnvValue(body.from) : undefined,
+    };
 
     if (action === 'send') {
       const recipient = typeof body.testRecipient === 'string' ? body.testRecipient.trim() : '';
@@ -174,7 +137,7 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
       return reply.status(res.success ? 200 : 400).send(res);
     }
 
-    const verifyRes = await emailService.verifySmtpConnection(override);
+    const verifyRes = await emailService.verifyResendConnection(override);
     return reply.status(verifyRes.success ? 200 : 400).send(verifyRes);
   });
 

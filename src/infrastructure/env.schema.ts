@@ -4,8 +4,8 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().positive().default(4000),
-  JWT_SECRET: z.string().min(16).default('vton_unified_jwt_secret_production_ready_2026'),
-  INTERNAL_SERVICE_KEY: z.string().min(16).default('vton_internal_service_key_dev'),
+  JWT_SECRET: z.string().min(16),
+  INTERNAL_SERVICE_KEY: z.string().min(16),
 
   DATABASE_URL: z.string().optional().default(''),
   DIRECT_URL: z.string().optional().default(''),
@@ -27,6 +27,10 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional().default(''),
   GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
   FAL_KEY: z.string().optional().default(''),
+
+  // Resend Email Delivery
+  RESEND_API_KEY: z.string().optional().default(''),
+  RESEND_FROM: z.string().optional().default('V-TRY Studio <onboarding@resend.dev>'),
 
   CORS_ORIGINS: z.string().optional().default(''),
 });

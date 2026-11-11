@@ -1,3 +1,4 @@
+import './infrastructure/config.js';
 import { getValidatedEnv } from './infrastructure/env.schema.js';
 import { logger } from './infrastructure/logger.js';
 import { initGlobalPrisma, disconnectPrisma } from './infrastructure/prisma.js';

@@ -39,7 +39,7 @@ export async function systemRoutes(app: FastifyInstance) {
         integrations: {
           imageStorage: cloudinaryStorage.isConfigured() ? 'configured' : 'not configured',
           aiService: config.aiServiceUrl ? 'configured' : 'not configured',
-          email: config.smtpHost ? 'configured' : 'dev preview mode'
+          email: config.resendApiKey ? 'resend configured' : 'dev preview mode'
         },
         endpoints: {
           health: '/health',

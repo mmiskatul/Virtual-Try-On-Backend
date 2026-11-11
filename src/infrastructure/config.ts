@@ -25,7 +25,7 @@ if (fs.existsSync(envPath)) {
 export const config = {
   host: process.env.HOST || '0.0.0.0',
   port: Number(process.env.PORT || 4000),
-  jwtSecret: process.env.JWT_SECRET || 'vton_unified_jwt_secret_production_ready_2026',
+  jwtSecret: process.env.JWT_SECRET || '',
 
   // AI Service & Vision Providers
   aiServiceUrl: process.env.AI_SERVICE_URL || 'http://localhost:8000',
@@ -50,30 +50,9 @@ export const config = {
   cloudinaryApiSecret: process.env.CLOUDINARY_API_SECRET || '',
   cloudinaryFolder: process.env.CLOUDINARY_FOLDER || 'virtual-try-on',
 
-  // SMTP Email Configuration
-  smtpHost: process.env.NODE_ENV === 'test' ? '' : process.env.SMTP_HOST || '', // tests never send real email
-  smtpPort: Number(process.env.SMTP_PORT || 587),
-  smtpSecure: process.env.SMTP_SECURE === 'true',
-  smtpUser: process.env.SMTP_USER || '',
-  // Gmail shows app passwords as "abcd efgh ijkl mnop"; the spaces are not part of the password.
-  smtpPass: (process.env.SMTP_PASS || '').replace(/\s+/g, ''),
-  // Gmail rewrites any From that is not the authenticated account, so default to SMTP_USER.
-  emailFrom: (() => {
-    const raw = (process.env.SMTP_FROM || '').trim();
-    const user = (process.env.SMTP_USER || '').trim();
-    const fallback = user ? `V-TRY Studio <${user}>` : 'V-TRY Studio <noreply@v-try.fashion>';
-    if (!raw) return fallback;
-    // Repair "Name<addr>" -> "Name <addr>"
-    const fixed = raw.replace(/^"?([^"<]*?)"?\s*<([^>]+)>$/, (_m, n, a) => `${n.trim()} <${a}>`);
-    // Gmail SMTP only sends as the authenticated user
-    if (process.env.SMTP_HOST?.includes('gmail') && user && !fixed.includes(user)) {
-      const name = fixed.includes('<') ? fixed.split('<')[0].trim() : 'V-TRY Studio';
-      return `${name || 'V-TRY Studio'} <${user}>`;
-    }
-    return fixed;
-  })(),
-  resendApiKey: process.env.RESEND_API_KEY || '',
-  resendFrom: process.env.RESEND_FROM || 'V-TRY Studio <onboarding@resend.dev>',
+  // Resend Email Delivery (Account Verification & Password Reset)
+  resendApiKey: process.env.NODE_ENV === 'test' ? '' : (process.env.RESEND_API_KEY || '').trim(),
+  resendFrom: (process.env.RESEND_FROM || 'V-TRY Studio<onboarding@resend.dev>').trim(),
 
   // Default Frontend Portal Origins (for email links)
   marketplaceUrl: 'http://localhost:3000',
