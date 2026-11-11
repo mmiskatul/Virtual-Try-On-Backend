@@ -75,6 +75,8 @@ export async function customerAuthRoutes(app: FastifyInstance) {
       message: 'Account created! Please verify your email address before signing in.',
       requiresEmailVerification: true,
       user: sanitizePublicUser(created),
+      emailDelivered: mailResult.delivered,
+      ...(!mailResult.delivered ? { warning: 'Account created, but the verification email could not be sent. Use "Resend verification" in a minute.' } : {}),
       ...(mailResult.preview ? { devPreview: mailResult.preview } : {}),
     });
   });

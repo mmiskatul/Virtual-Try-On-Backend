@@ -247,6 +247,13 @@ export function registerSharedAuthRoutes(
     const portal = resolvePortal(body.portal, defaultPortal);
     const mailResult = await dispatchVerificationForUser(user, portal, extractRequestOrigin(request));
 
+    if (!mailResult.delivered) {
+      return reply.status(502).send({
+        error: 'EmailDeliveryFailed',
+        message: 'We could not send the verification email right now. Please try again shortly.',
+      });
+    }
+
     return {
       message: 'Verification email sent! Check your inbox for the verification link or 6-digit code.',
       ...(mailResult.preview ? { devPreview: mailResult.preview } : {}),

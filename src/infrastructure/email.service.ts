@@ -4,6 +4,7 @@ import { AuthPortal } from '../domain/types.js';
 
 export interface EmailSendResult {
   delivered: boolean;
+  error?: string;
   provider: 'resend' | 'smtp' | 'dev-preview';
   preview?: {
     actionUrl?: string;
@@ -93,7 +94,21 @@ class EmailService {
   private smtpTransporter: Transporter | null = null;
 
   public hasRealTransport(): boolean {
-    return Boolean(config.smtpHost);
+    return Boolean(config.smtpHost) || this.hasResend();
+  }
+
+  private hasResend(): boolean {
+    return Boolean(config.resendApiKey) && process.env.NODE_ENV !== 'test';
+  }
+
+  private async sendViaResend(payload: BaseMailPayload): Promise<void> {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${config.resendApiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: config.resendFrom, to: [payload.to], subject: payload.subject, html: payload.html, text: payload.text }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error(`Resend API ${res.status}: ${(await res.text()).slice(0, 200)}`);
   }
 
   public getActiveTransport(): 'smtp' | 'dev-preview' {
@@ -239,7 +254,20 @@ class EmailService {
   }
 
   private async dispatch(payload: BaseMailPayload): Promise<EmailSendResult> {
-    // 1. Nodemailer SMTP (when SMTP_HOST is configured)
+    let lastError = '';
+
+    // 1. Resend HTTPS API (works on hosts that block outbound SMTP ports)
+    if (this.hasResend()) {
+      try {
+        await this.sendViaResend(payload);
+        return { delivered: true, provider: 'resend' };
+      } catch (err: any) {
+        lastError = `Resend: ${err?.message || err}`;
+        console.error('[EmailService] Resend dispatch error:', lastError);
+      }
+    }
+
+    // 2. Nodemailer SMTP (when SMTP_HOST is configured)
     const transporter = this.getSmtpTransporter();
     if (transporter) {
       try {
@@ -252,11 +280,18 @@ class EmailService {
         });
         return { delivered: true, provider: 'smtp' };
       } catch (err: any) {
-        console.warn('[EmailService] SMTP dispatch error:', err?.message || err);
+        lastError = `SMTP: ${err?.message || err}`;
+        console.error('[EmailService] SMTP dispatch error:', lastError);
+        this.reloadTransport();
       }
     }
 
-    // 2. Development Preview Fallback
+    // A real transport is configured but failed: report it honestly, never pretend it was sent.
+    if (this.hasRealTransport()) {
+      return { delivered: false, provider: transporter ? 'smtp' : 'resend', error: lastError };
+    }
+
+    // 3. Development Preview Fallback (no transport configured)
     console.log('\n================ [EmailService - Dev Preview] ================');
     console.log(`To:      ${payload.to}`);
     console.log(`Subject: ${payload.subject}`);

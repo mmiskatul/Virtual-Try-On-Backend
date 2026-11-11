@@ -55,8 +55,25 @@ export const config = {
   smtpPort: Number(process.env.SMTP_PORT || 587),
   smtpSecure: process.env.SMTP_SECURE === 'true',
   smtpUser: process.env.SMTP_USER || '',
-  smtpPass: process.env.SMTP_PASS || '',
-  emailFrom: process.env.SMTP_FROM || 'V-TRY Studio <noreply@v-try.fashion>',
+  // Gmail shows app passwords as "abcd efgh ijkl mnop"; the spaces are not part of the password.
+  smtpPass: (process.env.SMTP_PASS || '').replace(/\s+/g, ''),
+  // Gmail rewrites any From that is not the authenticated account, so default to SMTP_USER.
+  emailFrom: (() => {
+    const raw = (process.env.SMTP_FROM || '').trim();
+    const user = (process.env.SMTP_USER || '').trim();
+    const fallback = user ? `V-TRY Studio <${user}>` : 'V-TRY Studio <noreply@v-try.fashion>';
+    if (!raw) return fallback;
+    // Repair "Name<addr>" -> "Name <addr>"
+    const fixed = raw.replace(/^"?([^"<]*?)"?\s*<([^>]+)>$/, (_m, n, a) => `${n.trim()} <${a}>`);
+    // Gmail SMTP only sends as the authenticated user
+    if (process.env.SMTP_HOST?.includes('gmail') && user && !fixed.includes(user)) {
+      const name = fixed.includes('<') ? fixed.split('<')[0].trim() : 'V-TRY Studio';
+      return `${name || 'V-TRY Studio'} <${user}>`;
+    }
+    return fixed;
+  })(),
+  resendApiKey: process.env.RESEND_API_KEY || '',
+  resendFrom: process.env.RESEND_FROM || 'V-TRY Studio <onboarding@resend.dev>',
 
   // Default Frontend Portal Origins (for email links)
   marketplaceUrl: 'http://localhost:3000',
