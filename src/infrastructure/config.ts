@@ -51,7 +51,7 @@ export const config = {
   cloudinaryFolder: process.env.CLOUDINARY_FOLDER || 'virtual-try-on',
 
   // SMTP Email Configuration
-  smtpHost: process.env.SMTP_HOST || '',
+  smtpHost: process.env.NODE_ENV === 'test' ? '' : process.env.SMTP_HOST || '', // tests never send real email
   smtpPort: Number(process.env.SMTP_PORT || 587),
   smtpSecure: process.env.SMTP_SECURE === 'true',
   smtpUser: process.env.SMTP_USER || '',

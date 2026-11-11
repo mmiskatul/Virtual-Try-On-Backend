@@ -22,10 +22,10 @@ export async function brandAuthRoutes(app: FastifyInstance) {
     const password = typeof body.password === 'string' ? body.password : '';
     const ownerName = typeof body.ownerName === 'string' ? body.ownerName.trim() : '';
 
-    if (!brandName || !slug || !rawEmail || !password || !ownerName) {
+    if (!brandName || !rawEmail || !password || !ownerName) {
       return reply.status(400).send({
         error: 'ValidationError',
-        message: 'All fields (brandName, slug, email, password, ownerName) are required.',
+        message: 'All fields (brandName, email, password, ownerName) are required.',
       });
     }
 
@@ -45,19 +45,18 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       });
     }
 
-    const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '');
-    if (cleanSlug.length < 2) {
-      return reply.status(400).send({
-        error: 'ValidationError',
-        message: 'Storefront slug must contain at least 2 alphanumeric characters.',
-      });
-    }
-
-    if (db.getTenantBySlug(cleanSlug)) {
+    // The storefront slug is generated from the brand name; a number is appended if it is taken.
+    const slugify = (v: string) => v.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const baseSlug = slugify(slug || brandName).slice(0, 50).replace(/-$/, '') || 'brand';
+    let cleanSlug = baseSlug.length >= 2 ? baseSlug : `${baseSlug}-brand`;
+    if (slug && db.getTenantBySlug(cleanSlug)) {
       return reply.status(409).send({
         error: 'ConflictError',
         message: `Brand slug '${cleanSlug}' is already registered.`,
       });
+    }
+    for (let i = 2; db.getTenantBySlug(cleanSlug); i++) {
+      cleanSlug = `${baseSlug}-${i}`;
     }
 
     if (db.getUserByEmail(email)) {
@@ -77,7 +76,7 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       contactEmail: email,
       storefrontSettings: {
         primaryColor: '#0f172a',
-        accentColor: '#38bdf8',
+        accentColor: '#000000',
         announcement: 'Welcome to our brand new storefront!',
         aboutText: `Welcome to ${brandName}.`,
       },
