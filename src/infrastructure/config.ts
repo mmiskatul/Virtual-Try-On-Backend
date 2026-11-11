@@ -52,7 +52,7 @@ export const config = {
 
   // Resend Email Delivery (Account Verification & Password Reset)
   resendApiKey: process.env.NODE_ENV === 'test' ? '' : (process.env.RESEND_API_KEY || '').trim(),
-  resendFrom: (process.env.RESEND_FROM || 'V-TRY Studio<onboarding@resend.dev>').trim(),
+  resendFrom: (process.env.RESEND_FROM || 'V-TRY Studio <onboarding@resend.dev>').trim(),
 
   // Default Frontend Portal Origins (for email links)
   marketplaceUrl: 'http://localhost:3000',

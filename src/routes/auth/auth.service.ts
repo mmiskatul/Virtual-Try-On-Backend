@@ -264,7 +264,9 @@ export function registerSharedAuthRoutes(
     if (!mailResult.delivered) {
       return reply.status(502).send({
         error: 'EmailDeliveryFailed',
-        message: 'We could not send the verification email right now. Please try again shortly.',
+        message: mailResult.error
+          ? `We could not send the verification email: ${mailResult.error}`
+          : 'We could not send the verification email right now. Please try again shortly.',
       });
     }
 

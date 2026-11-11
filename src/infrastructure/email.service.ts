@@ -40,6 +40,22 @@ function escapeHtml(input: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/**
+ * Ensure Resend receives RFC-5322 `Name <email>` or `email` format even if configured as `Name . email`.
+ */
+function normalizeFromAddress(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return 'V-TRY Studio <onboarding@resend.dev>';
+  if (/^[^\s<>]+@[^\s<>]+$/.test(trimmed) || /^.+<\s*[^\s<>]+@[^\s<>]+\s*>$/.test(trimmed)) {
+    return trimmed;
+  }
+  const match = trimmed.match(/^(.+?)\s*[.\-·|]+\s*([^\s<>]+@[^\s<>]+)$/);
+  if (match && match[1].trim()) {
+    return `${match[1].trim()} <${match[2].trim()}>`;
+  }
+  return trimmed;
+}
+
 function isTrustedPortalOrigin(urlStr: string): string | undefined {
   try {
     const parsed = new URL(urlStr);
@@ -142,6 +158,13 @@ class EmailService {
       const { error } = await client.domains.list();
       const latencyMs = Number((performance.now() - start).toFixed(1));
       if (error) {
+        if ((error as any).name === 'restricted_api_key') {
+          return {
+            success: true,
+            latencyMs,
+            message: `Resend Sending-only API key verified (${latencyMs}ms). Ready to send verification and reset emails.`,
+          };
+        }
         return {
           success: false,
           latencyMs,
@@ -173,7 +196,7 @@ class EmailService {
     message: string;
   }> {
     const client = this.getClient(override?.apiKey);
-    const fromAddr = (override?.from ?? config.resendFrom).trim() || 'V-TRY Studio <onboarding@resend.dev>';
+    const fromAddr = normalizeFromAddress(override?.from ?? config.resendFrom);
 
     if (!client) {
       return {
@@ -229,7 +252,7 @@ class EmailService {
       if (client) {
         try {
           const { data, error } = await client.emails.send({
-            from: config.resendFrom,
+            from: normalizeFromAddress(config.resendFrom),
             to: [payload.to],
             subject: payload.subject,
             html: payload.html,

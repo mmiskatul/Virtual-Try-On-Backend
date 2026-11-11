@@ -38,7 +38,7 @@ export async function customerAuthRoutes(app: FastifyInstance) {
         exists: true,
         portalMismatch: true,
         email,
-        message: 'This email belongs to a Brand or Admin account. Please sign in on that portal.',
+        message: 'This email address is already in use. Please use a different email address.',
       };
     }
 
@@ -89,7 +89,7 @@ export async function customerAuthRoutes(app: FastifyInstance) {
     if (user && user.role !== 'CUSTOMER') {
       return reply.status(403).send({
         error: 'PortalMismatch',
-        message: 'This email belongs to a Brand or Admin account. Please sign in on that portal.',
+        message: 'This email address is already in use. Please use a different Google account or email address.',
       });
     }
     if (!user) {
@@ -179,7 +179,13 @@ export async function customerAuthRoutes(app: FastifyInstance) {
       requiresEmailVerification: true,
       user: sanitizePublicUser(created),
       emailDelivered: mailResult.delivered,
-      ...(!mailResult.delivered ? { warning: 'Account created, but the verification email could not be sent. Use "Resend verification" in a minute.' } : {}),
+      ...(!mailResult.delivered
+        ? {
+            warning: mailResult.error
+              ? `Account created, but email delivery failed: ${mailResult.error}`
+              : 'Account created, but the verification email could not be sent. Use "Resend verification" in a minute.',
+          }
+        : {}),
       ...(mailResult.preview ? { devPreview: mailResult.preview } : {}),
     });
   });
@@ -209,7 +215,7 @@ export async function customerAuthRoutes(app: FastifyInstance) {
     if (user.role !== 'CUSTOMER') {
       return reply.status(403).send({
         error: 'Forbidden',
-        message: 'This account belongs to a Brand or Admin portal. Please sign in on that portal.',
+        message: 'This email address is already in use. Please use a different email address.',
       });
     }
 
