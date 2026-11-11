@@ -5,6 +5,7 @@ import { AuthPortal } from '../domain/types.js';
 export interface EmailSendResult {
   delivered: boolean;
   error?: string;
+  warning?: string;
   provider: 'resend' | 'dev-preview';
   messageId?: string;
   preview?: {
@@ -247,6 +248,8 @@ class EmailService {
   }
 
   private async dispatch(payload: BaseMailPayload): Promise<EmailSendResult> {
+    let fallbackWarning: string | undefined;
+
     if (this.hasRealTransport()) {
       const client = this.getClient();
       if (client) {
@@ -258,20 +261,26 @@ class EmailService {
             html: payload.html,
             text: payload.text,
           });
-          if (error) {
-            console.error('[EmailService] Resend dispatch error:', error.message);
+          if (!error) {
+            return { delivered: true, provider: 'resend', messageId: data?.id };
+          }
+          console.error('[EmailService] Resend dispatch error:', error.message);
+          if (process.env.NODE_ENV === 'production') {
             return { delivered: false, provider: 'resend', error: error.message };
           }
-          return { delivered: true, provider: 'resend', messageId: data?.id };
+          fallbackWarning = `Resend could not send live email (${error.message}). Showing local verification code for testing.`;
         } catch (err: any) {
           const msg = err?.message || String(err);
           console.error('[EmailService] Resend dispatch exception:', msg);
-          return { delivered: false, provider: 'resend', error: msg };
+          if (process.env.NODE_ENV === 'production') {
+            return { delivered: false, provider: 'resend', error: msg };
+          }
+          fallbackWarning = `Resend could not send live email (${msg}). Showing local verification code for testing.`;
         }
       }
     }
 
-    // Development Preview Fallback (when RESEND_API_KEY is unset or NODE_ENV === 'test')
+    // Development Preview Fallback (when RESEND_API_KEY is unset, NODE_ENV === 'test', or Resend domain/sandbox rejects in dev)
     console.log('\n================ [EmailService - Dev Preview] ================');
     console.log(`To:      ${payload.to}`);
     console.log(`Subject: ${payload.subject}`);
@@ -282,7 +291,8 @@ class EmailService {
     return {
       delivered: true,
       provider: 'dev-preview',
-      preview: this.isDevPreviewAllowed() ? payload.preview : undefined,
+      ...(fallbackWarning ? { warning: fallbackWarning } : {}),
+      preview: process.env.NODE_ENV !== 'production' ? payload.preview : undefined,
     };
   }
 

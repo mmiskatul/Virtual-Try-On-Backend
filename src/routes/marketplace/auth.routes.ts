@@ -178,12 +178,14 @@ export async function customerAuthRoutes(app: FastifyInstance) {
       message: 'Account created! Please verify your email address before signing in.',
       requiresEmailVerification: true,
       user: sanitizePublicUser(created),
-      emailDelivered: mailResult.delivered,
-      ...(!mailResult.delivered
+      emailDelivered: mailResult.delivered && !mailResult.warning,
+      ...(mailResult.warning || !mailResult.delivered
         ? {
-            warning: mailResult.error
-              ? `Account created, but email delivery failed: ${mailResult.error}`
-              : 'Account created, but the verification email could not be sent. Use "Resend verification" in a minute.',
+            warning:
+              mailResult.warning ||
+              (mailResult.error
+                ? `Account created, but email delivery failed: ${mailResult.error}`
+                : 'Account created, but the verification email could not be sent. Use "Resend verification" in a minute.'),
           }
         : {}),
       ...(mailResult.preview ? { devPreview: mailResult.preview } : {}),

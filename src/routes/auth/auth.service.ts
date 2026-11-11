@@ -271,7 +271,8 @@ export function registerSharedAuthRoutes(
     }
 
     return {
-      message: 'Verification email sent! Check your inbox for the verification link or 6-digit code.',
+      message: mailResult.warning || 'Verification email sent! Check your inbox for the verification link or 6-digit code.',
+      ...(mailResult.warning ? { warning: mailResult.warning } : {}),
       ...(mailResult.preview ? { devPreview: mailResult.preview } : {}),
     };
   });
