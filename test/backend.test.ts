@@ -29,6 +29,12 @@ async function runTests() {
   const healthBody = JSON.parse(healthRes.body);
   assert(healthBody.status === 'UP', 'Health status is UP');
 
+  const rootRes = await app.inject({ method: 'GET', url: '/' });
+  const rootBody = JSON.parse(rootRes.body);
+  assert(rootRes.statusCode === 200 && rootBody.status === 'UP' && !!rootBody.version && !!rootBody.endpoints, 'GET / returns service details');
+  assert(!/postgres|api[_-]?key|secret|password/i.test(rootRes.body.replace(/PostgreSQL/gi, '')), 'GET / leaks no secrets or connection strings');
+  assert((await app.inject({ method: 'HEAD', url: '/' })).statusCode === 200, 'HEAD / returns 200');
+
   const liveRes = await app.inject({ method: 'GET', url: '/live' });
   assert(liveRes.statusCode === 200, 'GET /live returns 200');
 
