@@ -40,7 +40,8 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
 
   // CORS Configuration
   app.register(cors, {
-    origin: true, // Allow frontend dashboards (3000, 3001, 3002, etc.)
+    // Allowed origins come from CORS_ORIGINS in .env; if empty, any origin is allowed (development only).
+    origin: config.corsOrigins.length > 0 ? config.corsOrigins : true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'x-idempotency-key', 'x-try-on-token']

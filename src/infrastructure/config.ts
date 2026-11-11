@@ -34,6 +34,13 @@ export const config = {
   falKey: process.env.FAL_KEY || '',
   vtonProvider: 'gemini', // Runtime selector updated via Super Admin AI Engine UI
 
+  // CORS: comma-separated list of allowed frontend origins (e.g. https://shop.example.com,http://localhost:3000).
+  // Empty = allow any origin (development only).
+  corsOrigins: (process.env.CORS_ORIGINS || '')
+    .split(',')
+    .map((o) => o.trim().replace(/\/+$/, ''))
+    .filter(Boolean),
+
   // Database (Supabase PostgreSQL / PostgreSQL)
   databaseUrl: process.env.DATABASE_URL || '',
 

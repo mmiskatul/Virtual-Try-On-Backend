@@ -35,6 +35,11 @@ async function runTests() {
   assert(!/postgres|api[_-]?key|secret|password/i.test(rootRes.body.replace(/PostgreSQL/gi, '')), 'GET / leaks no secrets or connection strings');
   assert((await app.inject({ method: 'HEAD', url: '/' })).statusCode === 200, 'HEAD / returns 200');
 
+  const corsOk = await app.inject({ method: 'GET', url: '/health', headers: { origin: 'http://localhost:3001' } });
+  assert(corsOk.headers['access-control-allow-origin'] === 'http://localhost:3001', 'CORS allows a listed origin');
+  const corsBad = await app.inject({ method: 'GET', url: '/health', headers: { origin: 'https://evil.example.com' } });
+  assert(!corsBad.headers['access-control-allow-origin'], 'CORS blocks an unlisted origin');
+
   const liveRes = await app.inject({ method: 'GET', url: '/live' });
   assert(liveRes.statusCode === 200, 'GET /live returns 200');
 
