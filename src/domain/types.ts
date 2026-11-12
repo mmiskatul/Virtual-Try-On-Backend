@@ -29,6 +29,7 @@ export interface StorefrontSettings {
   bannerImage?: string;
   onboardingCompleted?: boolean;
   onboardingCompletedAt?: number;
+  overviewChecklistIds?: string[];
   storefrontTitle?: string;
   slogan?: string;
   shortDescription?: string;

@@ -182,6 +182,7 @@ export const StorefrontSettingsOutputSchema = z
     bannerImage: z.string().optional(),
     onboardingCompleted: z.boolean().optional(),
     onboardingCompletedAt: z.number().optional(),
+    overviewChecklistIds: z.array(z.string()).optional(),
     storefrontTitle: z.string().optional(),
     slogan: z.string().optional(),
     shortDescription: z.string().optional(),

@@ -74,7 +74,7 @@ function normalizeTenantForOutput(tenant: Tenant): Tenant {
 
 type StorefrontTextField = Exclude<
   keyof StorefrontSettings,
-  'primaryColor' | 'accentColor' | 'headerStyle' | 'bannerImage' | 'onboardingCompleted' | 'onboardingCompletedAt' | 'socialLinks' | 'categories'
+  'primaryColor' | 'accentColor' | 'headerStyle' | 'bannerImage' | 'onboardingCompleted' | 'onboardingCompletedAt' | 'socialLinks' | 'categories' | 'overviewChecklistIds'
 >;
 
 const STOREFRONT_TEXT_FIELD_LIMITS: ReadonlyArray<[StorefrontTextField, number]> = [
