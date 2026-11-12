@@ -13,6 +13,25 @@ export interface StorefrontSettings {
   announcement?: string;
   aboutText?: string;
   bannerImage?: string;
+  onboardingCompleted?: boolean;
+  onboardingCompletedAt?: number;
+  storefrontTitle?: string;
+  slogan?: string;
+  shortDescription?: string;
+  categoryFocus?: string;
+  ownerName?: string;
+  legalName?: string;
+  businessType?: string;
+  phone?: string;
+  city?: string;
+  country?: string;
+  address?: string;
+  currency?: string;
+  socialLinks?: {
+    instagram?: string;
+    website?: string;
+    facebook?: string;
+  };
 }
 
 export interface Tenant {

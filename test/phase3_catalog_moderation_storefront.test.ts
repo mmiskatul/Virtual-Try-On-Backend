@@ -124,5 +124,91 @@ describe('Phase 3: Catalog, Variants, Dual Publication, Storefront & Moderation'
 
     await app.close();
   });
+
+  it('persists brand onboarding completion and extended profile fields across backend reload', async () => {
+    const app = createApp('all');
+    const brandLogin = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'elena@auraatelier.com', password: 'Test-Brand-Pass-1' },
+    });
+    expect(brandLogin.statusCode).toBe(200);
+    const brandToken = JSON.parse(brandLogin.body).token;
+
+    const draftPut = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/brand/profile',
+      headers: { Authorization: `Bearer ${brandToken}` },
+      payload: {
+        name: 'Veloura Test House',
+        description: 'Editorial outerwear & digital fit.',
+        contactEmail: 'owner@velouratest.com',
+        storefrontSettings: {
+          storefrontTitle: 'Veloura Official Flagship',
+          slogan: 'Tailored Fit Preview',
+          shortDescription: 'Architectural outerwear built for AI try-on.',
+          ownerName: 'Founder Test',
+          legalName: 'Veloura House Ltd.',
+          businessType: 'Fashion House / D2C Brand',
+          currency: 'EUR',
+          socialLinks: {
+            instagram: '@velouratest',
+            website: 'https://velouratest.example.com',
+          },
+          onboardingCompleted: false,
+        },
+      },
+    });
+    expect(draftPut.statusCode).toBe(200);
+
+    const midReload = await app.inject({
+      method: 'GET',
+      url: '/api/v1/brand/profile',
+      headers: { Authorization: `Bearer ${brandToken}` },
+    });
+    expect(midReload.statusCode).toBe(200);
+    const midTenant = JSON.parse(midReload.body).tenant;
+    expect(midTenant.storefrontSettings.onboardingCompleted).toBe(false);
+    expect(midTenant.storefrontSettings.storefrontTitle).toBe('Veloura Official Flagship');
+
+    const finalSavePut = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/brand/profile',
+      headers: { Authorization: `Bearer ${brandToken}` },
+      payload: {
+        name: 'Veloura Test House',
+        storefrontSettings: {
+          onboardingCompleted: true,
+        },
+      },
+    });
+    expect(finalSavePut.statusCode).toBe(200);
+
+    const themeOnlyPut = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/brand/storefront-settings',
+      headers: { Authorization: `Bearer ${brandToken}` },
+      payload: {
+        primaryColor: '#1E3A8A',
+      },
+    });
+    expect(themeOnlyPut.statusCode).toBe(200);
+
+    const finalReload = await app.inject({
+      method: 'GET',
+      url: '/api/v1/brand/profile',
+      headers: { Authorization: `Bearer ${brandToken}` },
+    });
+    expect(finalReload.statusCode).toBe(200);
+    const reloadedSettings = JSON.parse(finalReload.body).tenant.storefrontSettings;
+    expect(reloadedSettings.onboardingCompleted).toBe(true);
+    expect(typeof reloadedSettings.onboardingCompletedAt).toBe('number');
+    expect(reloadedSettings.storefrontTitle).toBe('Veloura Official Flagship');
+    expect(reloadedSettings.legalName).toBe('Veloura House Ltd.');
+    expect(reloadedSettings.primaryColor).toBe('#1E3A8A');
+    expect(reloadedSettings.socialLinks?.instagram).toBe('@velouratest');
+
+    await app.close();
+  });
 });
 

@@ -23,6 +23,28 @@ function isSafeHttpUrl(url: unknown): url is string {
   }
 }
 
+type StorefrontTextField = Exclude<
+  keyof StorefrontSettings,
+  'primaryColor' | 'accentColor' | 'bannerImage' | 'onboardingCompleted' | 'onboardingCompletedAt' | 'socialLinks'
+>;
+
+const STOREFRONT_TEXT_FIELD_LIMITS: ReadonlyArray<[StorefrontTextField, number]> = [
+  ['announcement', 200],
+  ['aboutText', 2000],
+  ['storefrontTitle', 160],
+  ['slogan', 200],
+  ['shortDescription', 320],
+  ['categoryFocus', 120],
+  ['ownerName', 120],
+  ['legalName', 160],
+  ['businessType', 80],
+  ['phone', 50],
+  ['city', 80],
+  ['country', 80],
+  ['address', 240],
+  ['currency', 12],
+];
+
 function sanitizeStorefrontSettings(raw: any, existing?: StorefrontSettings): StorefrontSettings {
   const next: StorefrontSettings = { ...(existing || {}) };
   if (typeof raw?.primaryColor === 'string' && /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(raw.primaryColor.trim())) {
@@ -31,14 +53,37 @@ function sanitizeStorefrontSettings(raw: any, existing?: StorefrontSettings): St
   if (typeof raw?.accentColor === 'string' && /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(raw.accentColor.trim())) {
     next.accentColor = raw.accentColor.trim();
   }
-  if (typeof raw?.announcement === 'string') {
-    next.announcement = raw.announcement.slice(0, 200);
-  }
-  if (typeof raw?.aboutText === 'string') {
-    next.aboutText = raw.aboutText.slice(0, 2000);
+  for (const [field, maxLen] of STOREFRONT_TEXT_FIELD_LIMITS) {
+    if (typeof raw?.[field] === 'string') {
+      next[field] = raw[field].trim().slice(0, maxLen);
+    }
   }
   if (isSafeHttpUrl(raw?.bannerImage)) {
     next.bannerImage = raw.bannerImage.trim();
+  }
+  if (typeof raw?.onboardingCompleted === 'boolean') {
+    next.onboardingCompleted = raw.onboardingCompleted;
+    if (raw.onboardingCompleted && !next.onboardingCompletedAt) {
+      next.onboardingCompletedAt = Date.now();
+    }
+  }
+  if (typeof raw?.onboardingCompletedAt === 'number' && Number.isFinite(raw.onboardingCompletedAt)) {
+    next.onboardingCompletedAt = raw.onboardingCompletedAt;
+  }
+  if (raw?.socialLinks && typeof raw.socialLinks === 'object') {
+    const prevSocial = next.socialLinks || {};
+    const nextSocial = { ...prevSocial };
+    if (typeof raw.socialLinks.instagram === 'string') {
+      nextSocial.instagram = raw.socialLinks.instagram.trim().slice(0, 120);
+    }
+    if (typeof raw.socialLinks.website === 'string') {
+      const trimmed = raw.socialLinks.website.trim();
+      nextSocial.website = !trimmed ? '' : isSafeHttpUrl(trimmed) ? trimmed : prevSocial.website;
+    }
+    if (typeof raw.socialLinks.facebook === 'string') {
+      nextSocial.facebook = raw.socialLinks.facebook.trim().slice(0, 160);
+    }
+    next.socialLinks = nextSocial;
   }
   return next;
 }
