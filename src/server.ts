@@ -8,6 +8,7 @@ import { config } from './infrastructure/config.js';
 import { observability } from './infrastructure/observability.js';
 import { sanitizeObject } from './infrastructure/sanitization.js';
 import { resolveCorrelationId } from './infrastructure/http.js';
+import { globalErrorHandler, notFoundHandler } from './infrastructure/errors.js';
 
 // Route handlers
 import { systemRoutes } from './routes/system.routes.js';
@@ -19,6 +20,7 @@ import { brandFabricRoutes } from './routes/brand/fabric.routes.js';
 import { brandInventoryRoutes } from './routes/brand/inventory.routes.js';
 import { brandOrderRoutes } from './routes/brand/order.routes.js';
 import { brandStorefrontRoutes } from './routes/brand/storefront.routes.js';
+import { brandProfileRoutes } from './routes/brand/profile.routes.js';
 import { brandUploadRoutes } from './routes/brand/upload.routes.js';
 import { brandOverviewRoutes } from './routes/brand/overview.routes.js';
 
@@ -131,16 +133,9 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
     }
   });
 
-  // Global Error Handler
-  app.setErrorHandler((error: any, _request, reply) => {
-    const statusCode = error.statusCode || 500;
-    const message = error.message || 'Internal Server Error';
-    reply.status(statusCode).send({
-      error: error.name || 'InternalError',
-      statusCode,
-      message
-    });
-  });
+  // Global Error & 404 Handlers
+  app.setErrorHandler(globalErrorHandler);
+  app.setNotFoundHandler(notFoundHandler);
 
   // Mount System, Private Signed Storage, and Unified Auth Session/RBAC Routes (Always available)
   app.register(systemRoutes);
@@ -157,6 +152,7 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
     app.register(brandInventoryRoutes);
     app.register(brandOrderRoutes);
     app.register(brandStorefrontRoutes);
+    app.register(brandProfileRoutes);
     app.register(brandUploadRoutes);
     app.register(brandOverviewRoutes);
   }

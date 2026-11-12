@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { STOREFRONT_HEADER_STYLES } from '../../domain/types.js';
+import { validateOutputWithSchema, zodIssuesToValidationIssues } from '../../infrastructure/errors.js';
 
 export const ALLOWED_UPLOAD_MIME_TYPES = new Set([
   'image/png',
@@ -68,7 +69,7 @@ export const SocialLinksInputSchema = z
     website: SafeExternalUrlSchema.optional(),
     facebook: z.string().trim().max(160).optional(),
   })
-  .strict();
+  .strip();
 
 export const ButtonStyleSchema = z.enum(['pill', 'rounded', 'square']);
 
@@ -355,26 +356,22 @@ export const ProductCreateResponseSchema = z.object({
 });
 
 export function formatZodValidationError(error: z.ZodError): {
+  statusCode: 400;
   error: 'ValidationError';
+  code: 'VALIDATION_ERROR';
   message: string;
-  issues: Array<{ path: string; message: string }>;
+  issues: Array<{ path: string; message: string; code?: string }>;
 } {
-  const issues = error.issues.map((issue) => ({
-    path: issue.path.join('.') || 'body',
-    message: issue.message,
-  }));
+  const issues = zodIssuesToValidationIssues(error);
   return {
+    statusCode: 400,
     error: 'ValidationError',
+    code: 'VALIDATION_ERROR',
     message: issues.map((i) => `${i.path}: ${i.message}`).join('; '),
     issues,
   };
 }
 
 export function validateZodOutput<T>(schema: z.ZodType<T>, payload: unknown, routeLabel: string): T {
-  const parsed = schema.safeParse(payload);
-  if (!parsed.success) {
-    const details = parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
-    throw new Error(`Response output validation failed on ${routeLabel}: ${details}`);
-  }
-  return parsed.data;
+  return validateOutputWithSchema(schema, payload, routeLabel);
 }
