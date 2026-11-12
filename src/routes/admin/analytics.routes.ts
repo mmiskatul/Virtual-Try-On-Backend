@@ -1,10 +1,14 @@
 import { FastifyInstance } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import { createAdminMiddleware, registerScopedPreHandlers, requireRole } from '../../infrastructure/auth.guard.js';
+
+const adminGuards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
 
 export async function adminAnalyticsRoutes(app: FastifyInstance) {
+  registerScopedPreHandlers(app, adminGuards);
+
   // Global Platform Overview
-  app.get('/api/v1/admin/analytics/overview', { preHandler: [authenticateToken, requireRole('SUPER_ADMIN')] }, async () => {
+  app.get('/api/v1/admin/analytics/overview', { preHandler: adminGuards }, async () => {
     const tenants = db.getTenants();
     const products = db.getProducts();
     const orders = db.getOrders();

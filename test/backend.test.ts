@@ -43,8 +43,8 @@ async function runTests() {
   const liveRes = await app.inject({ method: 'GET', url: '/live' });
   assert(liveRes.statusCode === 200, 'GET /live returns 200');
 
-  const metricsRes = await app.inject({ method: 'GET', url: '/metrics' });
-  assert(metricsRes.statusCode === 200, 'GET /metrics returns 200');
+  const unauthMetricsRes = await app.inject({ method: 'GET', url: '/metrics' });
+  assert(unauthMetricsRes.statusCode === 401, 'GET /metrics rejects unauthenticated caller with 401');
 
   // 2. Brand Authentication & Operations
   console.log('\n--- [2. Brand API Operations] ---');
@@ -110,9 +110,16 @@ async function runTests() {
   const newStock = JSON.parse(invAdjustRes.body).newStock;
   assert(newStock === 20, `Stock adjusted from 25 to 20 (got: ${newStock})`);
 
-  // Cloudinary upload status
-  const uploadStatusRes = await app.inject({ method: 'GET', url: '/api/v1/uploads/status' });
-  assert(uploadStatusRes.statusCode === 200, 'GET /api/v1/uploads/status returns 200');
+  // Cloudinary upload status (protected by brand portal middleware)
+  const unauthUploadStatusRes = await app.inject({ method: 'GET', url: '/api/v1/uploads/status' });
+  assert(unauthUploadStatusRes.statusCode === 401, 'GET /api/v1/uploads/status blocks unauthenticated caller with 401');
+
+  const uploadStatusRes = await app.inject({
+    method: 'GET',
+    url: '/api/v1/uploads/status',
+    headers: { authorization: `Bearer ${brandToken}` },
+  });
+  assert(uploadStatusRes.statusCode === 200, 'GET /api/v1/uploads/status returns 200 with valid brand token');
 
   // 3. Marketplace Discovery & Checkout
   console.log('\n--- [3. Marketplace Operations] ---');

@@ -1,9 +1,14 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import {
+  createBrandMiddleware,
+  registerScopedPreHandlers,
+} from '../../infrastructure/auth.guard.js';
+import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
 import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
 import { config } from '../../infrastructure/config.js';
 
-const brandGuards = [authenticateToken, requireRole('BRAND_OWNER', 'STORE_MANAGER')];
+const brandUploadReadGuards = createBrandMiddleware(requirePermission('brand:products', 'read'));
+const brandUploadWriteGuards = createBrandMiddleware(requirePermission('brand:products', 'write'));
 
 function sanitizeFolderPath(folder: unknown, tenantId: string): string {
   const defaultFolder = `${config.cloudinaryFolder}/${tenantId}`;
@@ -16,8 +21,10 @@ function sanitizeFolderPath(folder: unknown, tenantId: string): string {
 }
 
 export async function brandUploadRoutes(app: FastifyInstance) {
-  // Check Cloudinary storage integration status
-  app.get('/api/v1/uploads/status', async (_request: FastifyRequest, reply: FastifyReply) => {
+  registerScopedPreHandlers(app, brandUploadReadGuards);
+
+  // Check Cloudinary storage integration status (secured for authenticated brand users)
+  app.get('/api/v1/uploads/status', { preHandler: brandUploadReadGuards }, async (_request: FastifyRequest, reply: FastifyReply) => {
     const isCloud = cloudinaryStorage.isConfigured();
     return reply.send({
       provider: isCloud ? 'cloudinary' : 'local_fallback',
@@ -29,7 +36,7 @@ export async function brandUploadRoutes(app: FastifyInstance) {
   });
 
   // Upload an image (supports multipart file or JSON base64 payload)
-  app.post('/api/v1/uploads', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/uploads', { preHandler: brandUploadWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const isMultipart = typeof request.isMultipart === 'function' ? request.isMultipart() : false;
     const tenantId = request.tenant.id;

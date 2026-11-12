@@ -1,15 +1,22 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { config } from '../../infrastructure/config.js';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import {
+  createAdminMiddleware,
+  registerScopedPreHandlers,
+  requireRole,
+} from '../../infrastructure/auth.guard.js';
 import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
 import { isMaskedPlaceholder, maskSecret, sanitizeEnvValue, updateEnvFile } from '../../infrastructure/env_manager.js';
 
+const adminGuards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
+
 export async function adminAiEngineRoutes(app: FastifyInstance) {
+  registerScopedPreHandlers(app, adminGuards);
   // 1. Fetch AI Engine Configuration & Model Registry Status (Never leak plaintext API keys)
   app.get(
     '/api/v1/admin/ai-engine/config',
-    { preHandler: [authenticateToken, requireRole('SUPER_ADMIN')] },
+    { preHandler: adminGuards },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       let aiServiceCapabilities: any = null;
       try {
@@ -71,7 +78,7 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
   // 2. Update AI Engine Configuration (Dynamic Live Reload + Safe .env Sync)
   app.post(
     '/api/v1/admin/ai-engine/config',
-    { preHandler: [authenticateToken, requireRole('SUPER_ADMIN')] },
+    { preHandler: adminGuards },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const body = (request.body as any) || {};
       const {
@@ -173,7 +180,7 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
   // 3. Test API Key Connectivity Directly from Super Admin Dashboard
   app.post(
     '/api/v1/admin/ai-engine/test-key',
-    { preHandler: [authenticateToken, requireRole('SUPER_ADMIN')] },
+    { preHandler: adminGuards },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { provider, apiKey } = (request.body as any) || {};
 

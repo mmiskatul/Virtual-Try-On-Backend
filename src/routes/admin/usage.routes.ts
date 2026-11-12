@@ -1,8 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import { createAdminMiddleware, registerScopedPreHandlers, requireRole } from '../../infrastructure/auth.guard.js';
 
-const guards = [authenticateToken, requireRole('SUPER_ADMIN')];
+const guards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
 const PLANS = ['STARTER', 'PRO', 'ENTERPRISE'];
 
 function limitParam(raw: unknown, fallback = 100): number {
@@ -11,6 +11,8 @@ function limitParam(raw: unknown, fallback = 100): number {
 }
 
 export async function adminUsageRoutes(app: FastifyInstance) {
+  registerScopedPreHandlers(app, guards);
+
   // Per-shop quota, usage and generation outcome summary
   app.get('/api/v1/admin/usage', { preHandler: guards }, async () => {
     const jobs = db.getAllGenerations();

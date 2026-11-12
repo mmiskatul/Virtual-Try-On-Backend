@@ -1,10 +1,17 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import {
+  createAdminMiddleware,
+  createBrandMiddleware,
+  requireRole,
+} from '../../infrastructure/auth.guard.js';
+import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
 import { StorefrontSettings, Tenant } from '../../domain/types.js';
 
-const brandReadGuards = [authenticateToken, requireRole('BRAND_OWNER', 'STORE_MANAGER')];
-const brandOwnerGuards = [authenticateToken, requireRole('BRAND_OWNER')];
+const brandReadGuards = createBrandMiddleware(requirePermission('brand:products', 'read'));
+const brandAnalyticsGuards = createBrandMiddleware(requirePermission('brand:analytics', 'read'));
+const brandOwnerGuards = createBrandMiddleware(requireRole('BRAND_OWNER'));
+const superAdminInternalGuards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
 
 function isSafeHttpUrl(url: unknown): url is string {
   if (typeof url !== 'string' || !url.trim()) return false;
@@ -72,7 +79,7 @@ export async function brandStorefrontRoutes(app: FastifyInstance) {
   });
 
   // Brand Analytics
-  app.get('/api/v1/brand/analytics', { preHandler: brandReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/v1/brand/analytics', { preHandler: brandAnalyticsGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const tenantId = request.tenant.id;
     const products = db.getProductsByTenant(tenantId);
@@ -135,7 +142,7 @@ export async function brandStorefrontRoutes(app: FastifyInstance) {
   // Internal Tenants Directory (protected by SUPER_ADMIN bearer token)
   app.get(
     '/api/v1/internal/tenants',
-    { preHandler: [authenticateToken, requireRole('SUPER_ADMIN')] },
+    { preHandler: superAdminInternalGuards },
     async () => {
       return { tenants: db.getTenants() };
     }

@@ -8,6 +8,7 @@ import { config } from '../infrastructure/config.js';
 import { redisAdapter } from '../infrastructure/redis.js';
 import { rabbitMqBus } from '../infrastructure/rabbitmq.js';
 import { storageAdapter } from '../infrastructure/storage.adapter.js';
+import { createAdminMiddleware } from '../infrastructure/auth.guard.js';
 
 const startedAt = Date.now();
 let appVersion = '2.0.0';
@@ -100,7 +101,7 @@ export async function systemRoutes(app: FastifyInstance) {
     return { status: 'READY' };
   });
 
-  app.get('/metrics', async () => {
+  app.get('/metrics', { preHandler: createAdminMiddleware() }, async () => {
     return observability.getMetrics();
   });
 }

@@ -1,10 +1,12 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import {
+  createAdminMiddleware,
+  createBrandMiddleware,
+} from '../../infrastructure/auth.guard.js';
 import { okResponse } from '../../infrastructure/http.js';
 import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
-import { tenantScopeGuard } from '../../modules/tenants/tenant.scope.js';
 import { catalogRepository } from '../../modules/catalog/catalog.repository.js';
 
 const CategoryCreateSchema = z.object({
@@ -36,8 +38,9 @@ const ModerateProductSchema = z.object({
   sponsored: z.boolean().optional(),
 });
 
-const readGuards = [authenticateToken, tenantScopeGuard, requirePermission('brand:products', 'read')];
-const writeGuards = [authenticateToken, tenantScopeGuard, requirePermission('brand:products', 'write')];
+const readGuards = createBrandMiddleware(requirePermission('brand:products', 'read'));
+const writeGuards = createBrandMiddleware(requirePermission('brand:products', 'write'));
+const adminModerationGuards = createAdminMiddleware(requirePermission('moderation', 'action'));
 
 export async function brandCatalogExtRoutes(app: FastifyInstance) {
   // Brand Categories
@@ -107,7 +110,7 @@ export async function brandCatalogExtRoutes(app: FastifyInstance) {
   // Super Admin / Moderator: Moderate a product listing (approve, flag, reject, feature)
   app.patch(
     '/api/v1/admin/moderation/products/:id',
-    { preHandler: [authenticateToken, requirePermission('moderation', 'action')] },
+    { preHandler: adminModerationGuards },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = request.params as { id: string };
       const parsed = ModerateProductSchema.safeParse(request.body || {});

@@ -2,7 +2,11 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../../infrastructure/config.js';
 import { db } from '../../infrastructure/database.js';
 import { emailService } from '../../infrastructure/email.service.js';
-import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import {
+  createAdminMiddleware,
+  registerScopedPreHandlers,
+  requireRole,
+} from '../../infrastructure/auth.guard.js';
 import { PrismaDatabase } from '../../infrastructure/prisma_database.js';
 import { NeonSqlDatabase } from '../../infrastructure/neon_database.js';
 import {
@@ -13,7 +17,7 @@ import {
   updateEnvFile,
 } from '../../infrastructure/env_manager.js';
 
-const adminGuards = [authenticateToken, requireRole('SUPER_ADMIN')];
+const adminGuards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function extractHost(uri: string): string {
@@ -36,6 +40,8 @@ function isValidPostgresUri(uri: string): boolean {
 }
 
 export async function adminInfrastructureRoutes(app: FastifyInstance) {
+  registerScopedPreHandlers(app, adminGuards);
+
   // 1. Read Masked Resend Email + Supabase / Database Configuration
   app.get('/api/v1/admin/infrastructure/config', { preHandler: adminGuards }, async () => {
     const prisma = db.getPrisma();

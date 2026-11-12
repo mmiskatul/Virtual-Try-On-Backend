@@ -4,6 +4,7 @@ import { AuthPortal, AuthToken, AuthTokenType, User } from '../../domain/types.j
 import { db } from '../../infrastructure/database.js';
 import { emailService, EmailSendResult } from '../../infrastructure/email.service.js';
 import { resolveOptionalAuthUser } from '../../infrastructure/auth.guard.js';
+import { BRAND_MEMBER_ROLE_CODES, PLATFORM_ADMIN_ROLE_CODES } from '../../modules/rbac/rbac.catalog.js';
 import {
   clearPortalAuthCookies,
   extractCookieToken,
@@ -259,7 +260,31 @@ export function registerSharedAuthRoutes(
         (request.headers['user-agent'] as string) || 'Marketplace Verified',
       );
       extraSessionFields = issued.responseFields;
-    }
+      } else if (defaultPortal === 'brand' && BRAND_MEMBER_ROLE_CODES.has(user.role)) {
+        const tenant = user.tenantId ? db.getTenantById(user.tenantId) : undefined;
+        if (!tenant || tenant.status === 'ACTIVE') {
+          const issued = await issuePortalAuthSession(
+            request,
+            reply,
+            'brand',
+            updatedUser || user,
+            (request.headers['user-agent'] as string) || 'Brand Verified',
+          );
+          extraSessionFields = {
+            ...issued.responseFields,
+            ...(tenant ? { tenant } : {}),
+          };
+        }
+      } else if (defaultPortal === 'admin' && PLATFORM_ADMIN_ROLE_CODES.has(user.role)) {
+        const issued = await issuePortalAuthSession(
+          request,
+          reply,
+          'admin',
+          updatedUser || user,
+          (request.headers['user-agent'] as string) || 'Admin Verified',
+        );
+        extraSessionFields = issued.responseFields;
+      }
 
     return {
       message: 'Email verified successfully! You can now sign in to your account.',
@@ -498,6 +523,7 @@ export function registerSharedAuthRoutes(
       });
     }
 
+    const { token: sidCookie } = extractCookieToken(request, 'session', defaultPortal);
     const rotated = await rotateRefreshSession(request, refreshToken, defaultPortal);
     if (!rotated.ok) {
       clearPortalAuthCookies(reply, request, defaultPortal);
@@ -508,6 +534,16 @@ export function registerSharedAuthRoutes(
         message: isReuse
           ? 'Refresh token reuse detected. Session has been revoked for security.'
           : 'Your session has expired or been revoked. Please sign in again.',
+      });
+    }
+
+    if (sidCookie && sidCookie !== rotated.sid) {
+      await revokeUserSession(rotated.sid);
+      clearPortalAuthCookies(reply, request, rotated.portal);
+      return reply.status(401).send({
+        error: 'SessionMismatch',
+        code: 'SESSION_MISMATCH',
+        message: 'Session cookie mismatch. Please sign in again.',
       });
     }
 
@@ -616,8 +652,14 @@ export function registerSharedAuthRoutes(
 
     const { token: refreshToken } = extractCookieToken(request, 'refresh', defaultPortal);
     if (refreshToken) {
+      const { token: sidCookie } = extractCookieToken(request, 'session', defaultPortal);
       const rotated = await rotateRefreshSession(request, refreshToken, defaultPortal);
       if (rotated.ok) {
+        if (sidCookie && sidCookie !== rotated.sid) {
+          await revokeUserSession(rotated.sid);
+          clearPortalAuthCookies(reply, request, rotated.portal);
+          return { authenticated: false, portal: defaultPortal, user: null };
+        }
         const tenant = rotated.user.tenantId ? db.getTenantById(rotated.user.tenantId) : undefined;
         if (tenant && tenant.status !== 'ACTIVE') {
           await revokeUserSession(rotated.sid);

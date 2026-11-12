@@ -1,7 +1,11 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import {
+  authenticateToken,
+  registerScopedPreHandlers,
+  requirePortalRole,
+} from '../../infrastructure/auth.guard.js';
 import { okResponse } from '../../infrastructure/http.js';
 import { PLATFORM_ADMIN_ROLE_CODES, requirePermission } from '../../modules/rbac/rbac.catalog.js';
 import { adminControlPlaneService } from '../../modules/admin/control_plane.service.js';
@@ -54,6 +58,8 @@ const WebhookCreateSchema = z.object({
 });
 
 export async function adminControlPlaneRoutes(app: FastifyInstance) {
+  registerScopedPreHandlers(app, [authenticateToken, requirePortalRole('admin')]);
+
   // Unified Super Admin Control Plane Hydration Snapshot
   app.get(
     '/api/v1/admin/control-plane/snapshot',

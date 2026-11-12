@@ -1,16 +1,19 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import {
+  createBrandMiddleware,
+  registerScopedPreHandlers,
+} from '../../infrastructure/auth.guard.js';
 import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
-import { tenantScopeGuard } from '../../modules/tenants/tenant.scope.js';
 import { Product, ProductVariant } from '../../domain/types.js';
 import { idempotencyManager } from '../../infrastructure/idempotency.js';
 import { catalogRepository } from '../../modules/catalog/catalog.repository.js';
 
-const brandReadGuards = [authenticateToken, tenantScopeGuard, requirePermission('brand:products', 'read')];
-const brandWriteGuards = [authenticateToken, tenantScopeGuard, requirePermission('brand:products', 'write')];
+const brandReadGuards = createBrandMiddleware(requirePermission('brand:products', 'read'));
+const brandWriteGuards = createBrandMiddleware(requirePermission('brand:products', 'write'));
 
 export async function brandProductRoutes(app: FastifyInstance) {
+  registerScopedPreHandlers(app, brandReadGuards);
   // List Products
   app.get('/api/v1/products', { preHandler: brandReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });

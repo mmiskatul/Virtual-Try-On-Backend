@@ -1,10 +1,14 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import { createAdminMiddleware, registerScopedPreHandlers, requireRole } from '../../infrastructure/auth.guard.js';
+
+const adminGuards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
 
 export async function adminTenantRoutes(app: FastifyInstance) {
+  registerScopedPreHandlers(app, adminGuards);
+
   // List all tenants with quotas & counts
-  app.get('/api/v1/admin/tenants', { preHandler: [authenticateToken, requireRole('SUPER_ADMIN')] }, async () => {
+  app.get('/api/v1/admin/tenants', { preHandler: adminGuards }, async () => {
     const tenants = db.getTenants();
     const products = db.getProducts();
     const orders = db.getOrders();
@@ -34,7 +38,7 @@ export async function adminTenantRoutes(app: FastifyInstance) {
   });
 
   // Suspend or Activate Tenant
-  app.patch('/api/v1/admin/tenants/:id/status', { preHandler: [authenticateToken, requireRole('SUPER_ADMIN')] }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.patch('/api/v1/admin/tenants/:id/status', { preHandler: adminGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const { status } = (request.body as any) || {};
 

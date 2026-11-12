@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import { authenticateToken, requirePortalRole } from '../../infrastructure/auth.guard.js';
 import { recordAudit } from '../../modules/audit/audit.service.js';
 import { PLATFORM_ADMIN_ROLE_CODES } from '../../modules/rbac/rbac.catalog.js';
 import {
@@ -72,7 +72,7 @@ export async function adminAuthRoutes(app: FastifyInstance) {
   // Authenticated Super Admin Profile / Me
   app.get(
     '/api/v1/admin/auth/me',
-    { preHandler: [authenticateToken, requireRole('SUPER_ADMIN')] },
+    { preHandler: [authenticateToken, requirePortalRole('admin')] },
     async (request: FastifyRequest) => {
       return {
         admin: sanitizePublicUser(request.authUser!),

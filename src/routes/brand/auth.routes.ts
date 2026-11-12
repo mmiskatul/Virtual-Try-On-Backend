@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import { authenticateToken, requirePortalRole } from '../../infrastructure/auth.guard.js';
 import { Tenant } from '../../domain/types.js';
 import { recordAudit } from '../../modules/audit/audit.service.js';
 import { BRAND_MEMBER_ROLE_CODES } from '../../modules/rbac/rbac.catalog.js';
@@ -207,7 +207,7 @@ export async function brandAuthRoutes(app: FastifyInstance) {
   });
 
   // Authenticated Brand Profile / Me
-  app.get('/api/v1/auth/me', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
+  app.get('/api/v1/auth/me', { preHandler: [authenticateToken, requirePortalRole('brand')] }, async (request: FastifyRequest) => {
     return {
       user: sanitizePublicUser(request.authUser!),
       tenant: request.tenant,

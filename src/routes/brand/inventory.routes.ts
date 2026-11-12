@@ -1,13 +1,20 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import {
+  createBrandMiddleware,
+  registerScopedPreHandlers,
+} from '../../infrastructure/auth.guard.js';
+import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
 import { idempotencyManager } from '../../infrastructure/idempotency.js';
 
-const brandGuards = [authenticateToken, requireRole('BRAND_OWNER', 'STORE_MANAGER')];
+const brandInventoryReadGuards = createBrandMiddleware(requirePermission('brand:products', 'read'));
+const brandInventoryWriteGuards = createBrandMiddleware(requirePermission('brand:products', 'write'));
 
 export async function brandInventoryRoutes(app: FastifyInstance) {
+  registerScopedPreHandlers(app, brandInventoryReadGuards);
+
   // Adjust Stock Atomically
-  app.post('/api/v1/inventory/adjust', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/inventory/adjust', { preHandler: brandInventoryWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const { productId, variantSku, change, reason } = (request.body as any) || {};
     if (!productId || !variantSku || typeof change !== 'number' || !Number.isInteger(change)) {
@@ -88,7 +95,7 @@ export async function brandInventoryRoutes(app: FastifyInstance) {
   });
 
   // Inventory Audit Logs
-  app.get('/api/v1/inventory/logs', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/v1/inventory/logs', { preHandler: brandInventoryReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const { productId } = request.query as { productId?: string };
     const logs = db.getInventoryLogs(request.tenant.id, productId);

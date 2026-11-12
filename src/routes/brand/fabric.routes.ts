@@ -1,20 +1,27 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken, requireRole } from '../../infrastructure/auth.guard.js';
+import {
+  createBrandMiddleware,
+  registerScopedPreHandlers,
+} from '../../infrastructure/auth.guard.js';
+import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
 import { Fabric } from '../../domain/types.js';
 
-const brandGuards = [authenticateToken, requireRole('BRAND_OWNER', 'STORE_MANAGER')];
+const brandFabricReadGuards = createBrandMiddleware(requirePermission('brand:products', 'read'));
+const brandFabricWriteGuards = createBrandMiddleware(requirePermission('brand:products', 'write'));
 
 export async function brandFabricRoutes(app: FastifyInstance) {
+  registerScopedPreHandlers(app, brandFabricReadGuards);
+
   // List Fabrics
-  app.get('/api/v1/fabrics', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.get('/api/v1/fabrics', { preHandler: brandFabricReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const fabrics = db.getFabricsByTenant(request.tenant.id);
     return { fabrics };
   });
 
   // Create Fabric
-  app.post('/api/v1/fabrics', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/fabrics', { preHandler: brandFabricWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const body = request.body as any;
     const { name, composition, color, pattern } = body || {};
@@ -46,7 +53,7 @@ export async function brandFabricRoutes(app: FastifyInstance) {
   });
 
   // Update Fabric (whitelist allowed fields)
-  app.put('/api/v1/fabrics/:id', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.put('/api/v1/fabrics/:id', { preHandler: brandFabricWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const { id } = request.params as { id: string };
     const body = (request.body as Partial<Fabric>) || {};
@@ -70,7 +77,7 @@ export async function brandFabricRoutes(app: FastifyInstance) {
   });
 
   // Delete Fabric
-  app.delete('/api/v1/fabrics/:id', { preHandler: brandGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.delete('/api/v1/fabrics/:id', { preHandler: brandFabricWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const { id } = request.params as { id: string };
     const deleted = db.deleteFabric(id, request.tenant.id);

@@ -263,6 +263,58 @@ async function runSecurityTests() {
   });
   assert(compromisedMe.statusCode === 401, 'Session revocation invalidates active access tokens after reuse attack');
 
+  // --- 6. Portal Middleware & Endpoint Protection Verification ---
+  console.log('\n--- [6. Portal Middleware & Unauthenticated/Cross-Portal Blocking] ---');
+  const protectedEndpoints = [
+    ['GET', '/metrics'],
+    ['GET', '/api/v1/admin/analytics/overview'],
+    ['GET', '/api/v1/admin/tenants'],
+    ['GET', '/api/v1/admin/control-plane/snapshot'],
+    ['GET', '/api/v1/admin/audit-logs'],
+    ['GET', '/api/v1/admin/ai/telemetry'],
+    ['GET', '/api/v1/admin/ai-engine/config'],
+    ['GET', '/api/v1/admin/infrastructure/config'],
+    ['GET', '/api/v1/admin/usage'],
+    ['GET', '/api/v1/admin/auth/me'],
+    ['GET', '/api/v1/uploads/status'],
+    ['GET', '/api/v1/fabrics'],
+    ['GET', '/api/v1/brand/orders'],
+    ['GET', '/api/v1/inventory/logs'],
+    ['GET', '/api/v1/brand/profile'],
+    ['GET', '/api/v1/auth/me'],
+  ] as const;
+
+  for (const [method, url] of protectedEndpoints) {
+    const res = await app.inject({ method, url });
+    assert(res.statusCode === 401, `Unauthenticated ${method} ${url} blocked with 401 (got ${res.statusCode})`);
+  }
+
+  for (const url of [
+    '/api/v1/auth/me',
+    '/api/v1/uploads/status',
+    '/api/v1/brand/profile',
+    '/api/v1/admin/auth/me',
+    '/metrics',
+  ]) {
+    const res = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${custToken}` } });
+    assert(res.statusCode === 403, `Customer cross-portal GET ${url} blocked with 403 (got ${res.statusCode})`);
+  }
+
+  for (const url of ['/api/v1/admin/auth/me', '/metrics', '/api/v1/admin/tenants']) {
+    const res = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${brandToken}` } });
+    assert(res.statusCode === 403, `Brand cross-portal GET ${url} blocked with 403 (got ${res.statusCode})`);
+  }
+
+  for (const url of ['/api/v1/fabrics', '/api/v1/uploads/status', '/api/v1/brand/orders', '/api/v1/auth/me']) {
+    const res = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${adminToken}` } });
+    assert(res.statusCode === 403, `Admin without View-As blocked from brand GET ${url} with 403 (got ${res.statusCode})`);
+  }
+
+  const adminMe = await app.inject({ method: 'GET', url: '/api/v1/admin/auth/me', headers: { authorization: `Bearer ${adminToken}` } });
+  assert(adminMe.statusCode === 200, 'Super Admin GET /api/v1/admin/auth/me returns 200');
+  const adminMetrics = await app.inject({ method: 'GET', url: '/metrics', headers: { authorization: `Bearer ${adminToken}` } });
+  assert(adminMetrics.statusCode === 200, 'Super Admin GET /metrics returns 200');
+
   db.reset();
   seedTestUsers();
 

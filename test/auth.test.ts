@@ -158,6 +158,48 @@ async function runAuthTests() {
     payload: { token: verifyToken },
   });
   assert(verifyTokenRes.statusCode === 200, 'Brand email verified via token link');
+  const verifyTokenBody = JSON.parse(verifyTokenRes.body);
+  assert(Boolean(verifyTokenBody.sessionId), 'Brand verify-email issues auto-login sessionId');
+  assert(verifyTokenBody.tenant?.slug === 'lumiere-mode', 'Brand verify-email returns tenant profile');
+  const rawVerifyCookies = verifyTokenRes.headers['set-cookie'];
+  const verifyCookieList = Array.isArray(rawVerifyCookies)
+    ? rawVerifyCookies
+    : rawVerifyCookies
+      ? [rawVerifyCookies]
+      : [];
+  const verifyCookieHeader = verifyCookieList.map((c) => c.split(';')[0]).join('; ');
+  for (const cookieName of ['vtry_brand_access=', 'vtry_brand_refresh=', 'vtry_brand_sid=']) {
+    const matchedLine = verifyCookieList.find((c) => c.startsWith(cookieName)) || '';
+    assert(Boolean(matchedLine), `Brand verify-email sets ${cookieName.replace('=', '')} cookie`);
+    assert(/;\s*HttpOnly/i.test(matchedLine), `Brand verify-email ${cookieName.replace('=', '')} has HttpOnly flag`);
+    assert(/;\s*SameSite=Lax/i.test(matchedLine), `Brand verify-email ${cookieName.replace('=', '')} has SameSite=Lax flag`);
+  }
+
+  const brandMissingSidHeader = verifyCookieList
+    .filter((c) => !c.startsWith('vtry_brand_sid='))
+    .map((c) => c.split(';')[0])
+    .join('; ');
+  const brandMissingSidRes = await app.inject({
+    method: 'GET',
+    url: '/api/v1/auth/me',
+    headers: {
+      cookie: brandMissingSidHeader,
+      'x-auth-portal': 'brand',
+      'x-auth-transport': 'cookie',
+    },
+  });
+  assert(brandMissingSidRes.statusCode === 401, 'Brand cookie-transport rejects /api/v1/auth/me when vtry_brand_sid is missing');
+
+  const brandAutoMe = await app.inject({
+    method: 'GET',
+    url: '/api/v1/auth/me',
+    headers: {
+      cookie: verifyCookieHeader,
+      'x-auth-portal': 'brand',
+      'x-auth-transport': 'cookie',
+    },
+  });
+  assert(brandAutoMe.statusCode === 200, 'Verified brand session immediately accesses /api/v1/auth/me without separate login');
 
   // Verified brand login succeeds
   const verifiedBrandLogin = await app.inject({
@@ -310,20 +352,42 @@ async function runAuthTests() {
   assert(Boolean(cookieLoginBody.session?.id), 'Cookie login returns non-secret session metadata');
 
   const mktCookies1 = extractSetCookies(cookieLogin.headers['set-cookie']);
-  assert(Boolean(mktCookies1.vtry_mkt_access?.value), 'vtry_mkt_access cookie set');
-  assert(Boolean(mktCookies1.vtry_mkt_refresh?.value), 'vtry_mkt_refresh cookie set');
-  assert(Boolean(mktCookies1.vtry_mkt_sid?.value), 'vtry_mkt_sid cookie set');
-  assert(/;\s*HttpOnly/i.test(mktCookies1.vtry_mkt_access.raw), 'Access cookie has HttpOnly flag');
-  assert(/;\s*SameSite=Lax/i.test(mktCookies1.vtry_mkt_refresh.raw), 'Refresh cookie has SameSite=Lax flag');
+  for (const cname of ['vtry_mkt_access', 'vtry_mkt_refresh', 'vtry_mkt_sid']) {
+    assert(Boolean(mktCookies1[cname]?.value), `${cname} cookie set on login`);
+    assert(/;\s*HttpOnly/i.test(mktCookies1[cname]?.raw || ''), `${cname} cookie has HttpOnly flag on login`);
+    assert(/;\s*SameSite=Lax/i.test(mktCookies1[cname]?.raw || ''), `${cname} cookie has SameSite=Lax flag on login`);
+  }
 
   const cookieHeader1 = `vtry_mkt_access=${encodeURIComponent(mktCookies1.vtry_mkt_access.value)}; vtry_mkt_refresh=${encodeURIComponent(mktCookies1.vtry_mkt_refresh.value)}; vtry_mkt_sid=${encodeURIComponent(mktCookies1.vtry_mkt_sid.value)}`;
   const meFromCookie = await app.inject({
     method: 'GET',
     url: '/api/v1/marketplace/auth/me',
-    headers: { cookie: cookieHeader1, 'x-auth-portal': 'marketplace' },
+    headers: { cookie: cookieHeader1, 'x-auth-portal': 'marketplace', 'x-auth-transport': 'cookie' },
   });
-  assert(meFromCookie.statusCode === 200, '/me authenticates via HttpOnly access cookie without Bearer header');
+  assert(meFromCookie.statusCode === 200, '/me authenticates via HttpOnly access + session cookies without Bearer header');
   assert(JSON.parse(meFromCookie.body).user.email === 'sarah.miller@example.com', '/me returns expected cookie user');
+
+  const meMissingSid = await app.inject({
+    method: 'GET',
+    url: '/api/v1/marketplace/auth/me',
+    headers: {
+      cookie: `vtry_mkt_access=${encodeURIComponent(mktCookies1.vtry_mkt_access.value)}`,
+      'x-auth-portal': 'marketplace',
+      'x-auth-transport': 'cookie',
+    },
+  });
+  assert(meMissingSid.statusCode === 401, 'Cookie-mode /me rejects missing vtry_mkt_sid');
+
+  const meMismatchSid = await app.inject({
+    method: 'GET',
+    url: '/api/v1/marketplace/auth/me',
+    headers: {
+      cookie: `vtry_mkt_access=${encodeURIComponent(mktCookies1.vtry_mkt_access.value)}; vtry_mkt_sid=tampered_sid_value`,
+      'x-auth-portal': 'marketplace',
+      'x-auth-transport': 'cookie',
+    },
+  });
+  assert(meMismatchSid.statusCode === 401, 'Cookie-mode /me rejects mismatched vtry_mkt_sid');
 
   const refreshRes = await app.inject({
     method: 'POST',
@@ -333,10 +397,12 @@ async function runAuthTests() {
   assert(refreshRes.statusCode === 200, 'Refresh endpoint rotates HttpOnly cookies cleanly');
   assert(JSON.parse(refreshRes.body).token === undefined, 'Cookie-mode /refresh omits token from JSON body');
   const mktCookies2 = extractSetCookies(refreshRes.headers['set-cookie']);
-  assert(Boolean(mktCookies2.vtry_mkt_access?.value), 'Rotated access cookie issued');
+  for (const cname of ['vtry_mkt_access', 'vtry_mkt_refresh', 'vtry_mkt_sid']) {
+    assert(Boolean(mktCookies2[cname]?.value), `Rotated ${cname} cookie issued`);
+    assert(/;\s*HttpOnly/i.test(mktCookies2[cname]?.raw || ''), `Rotated ${cname} has HttpOnly flag`);
+  }
   assert(
-    Boolean(mktCookies2.vtry_mkt_refresh?.value) &&
-      mktCookies2.vtry_mkt_refresh.value !== mktCookies1.vtry_mkt_refresh.value,
+    mktCookies2.vtry_mkt_refresh.value !== mktCookies1.vtry_mkt_refresh.value,
     'Refresh cookie rotates to a brand-new JTI token',
   );
 
@@ -350,6 +416,7 @@ async function runAuthTests() {
   const clearedCookies = extractSetCookies(logoutRes.headers['set-cookie']);
   assert(/Max-Age=0/i.test(clearedCookies.vtry_mkt_access?.raw || ''), '/logout expires vtry_mkt_access cookie');
   assert(/Max-Age=0/i.test(clearedCookies.vtry_mkt_refresh?.raw || ''), '/logout expires vtry_mkt_refresh cookie');
+  assert(/Max-Age=0/i.test(clearedCookies.vtry_mkt_sid?.raw || ''), '/logout expires vtry_mkt_sid cookie');
 
   const revokedMe = await app.inject({
     method: 'GET',
@@ -357,6 +424,62 @@ async function runAuthTests() {
     headers: { cookie: cookieHeader2, 'x-auth-portal': 'marketplace' },
   });
   assert(revokedMe.statusCode === 401, 'Old access cookie fails after /logout session revocation');
+
+  // Verify /refresh rejects mismatched vtry_mkt_sid and revokes the session
+  const bindingLogin1 = await app.inject({
+    method: 'POST',
+    url: '/api/v1/marketplace/auth/login',
+    headers: { 'x-auth-transport': 'cookie', 'x-auth-portal': 'marketplace' },
+    payload: { email: 'sarah.miller@example.com', password: 'Test-Customer-Pass-1' },
+  });
+  assert(bindingLogin1.statusCode === 200, 'Second cookie login succeeds for sid mismatch checks');
+  const bindCookies1 = extractSetCookies(bindingLogin1.headers['set-cookie']);
+  const mismatchRefreshRes = await app.inject({
+    method: 'POST',
+    url: '/api/v1/marketplace/auth/refresh',
+    headers: {
+      cookie: `vtry_mkt_refresh=${encodeURIComponent(bindCookies1.vtry_mkt_refresh.value)}; vtry_mkt_sid=tampered_sid_value`,
+      'x-auth-transport': 'cookie',
+      'x-auth-portal': 'marketplace',
+    },
+  });
+  assert(mismatchRefreshRes.statusCode === 401, '/refresh rejects mismatched vtry_mkt_sid');
+  const clearedOnMismatch = extractSetCookies(mismatchRefreshRes.headers['set-cookie']);
+  assert(/Max-Age=0/i.test(clearedOnMismatch.vtry_mkt_sid?.raw || ''), '/refresh mismatch clears vtry_mkt_sid cookie');
+
+  const validAfterMismatchRefresh = await app.inject({
+    method: 'POST',
+    url: '/api/v1/marketplace/auth/refresh',
+    headers: {
+      cookie: `vtry_mkt_refresh=${encodeURIComponent(bindCookies1.vtry_mkt_refresh.value)}; vtry_mkt_sid=${encodeURIComponent(bindCookies1.vtry_mkt_sid.value)}`,
+      'x-auth-transport': 'cookie',
+      'x-auth-portal': 'marketplace',
+    },
+  });
+  assert(validAfterMismatchRefresh.statusCode === 401, 'Mismatched /refresh revokes session so subsequent valid refresh also fails');
+
+  // Verify /session rejects mismatched vtry_mkt_sid and clears cookies
+  const bindingLogin2 = await app.inject({
+    method: 'POST',
+    url: '/api/v1/marketplace/auth/login',
+    headers: { 'x-auth-transport': 'cookie', 'x-auth-portal': 'marketplace' },
+    payload: { email: 'sarah.miller@example.com', password: 'Test-Customer-Pass-1' },
+  });
+  assert(bindingLogin2.statusCode === 200, 'Third cookie login succeeds for /session sid check');
+  const bindCookies2 = extractSetCookies(bindingLogin2.headers['set-cookie']);
+  const sessionMismatchRes = await app.inject({
+    method: 'GET',
+    url: '/api/v1/marketplace/auth/session',
+    headers: {
+      cookie: `vtry_mkt_access=${encodeURIComponent(bindCookies2.vtry_mkt_access.value)}; vtry_mkt_refresh=${encodeURIComponent(bindCookies2.vtry_mkt_refresh.value)}; vtry_mkt_sid=wrong_sid`,
+      'x-auth-portal': 'marketplace',
+    },
+  });
+  assert(sessionMismatchRes.statusCode === 200, '/session returns 200 when clearing mismatched sid');
+  assert(JSON.parse(sessionMismatchRes.body).authenticated === false, '/session reports authenticated: false on vtry_mkt_sid mismatch');
+  const clearedSessionCookies = extractSetCookies(sessionMismatchRes.headers['set-cookie']);
+  assert(/Max-Age=0/i.test(clearedSessionCookies.vtry_mkt_access?.raw || ''), '/session mismatch clears vtry_mkt_access');
+  assert(/Max-Age=0/i.test(clearedSessionCookies.vtry_mkt_sid?.raw || ''), '/session mismatch clears vtry_mkt_sid');
 
   // Reset snapshot cleanly back to baseline demo data
   db.reset();
