@@ -247,6 +247,7 @@ export class PrismaDatabase {
   public async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
     if (!this.prisma) return undefined;
     const data: any = { updatedAt: BigInt(Date.now()) };
+    if (updates.tenantId !== undefined) data.tenantId = updates.tenantId;
     if (updates.name !== undefined) data.name = updates.name;
     if (updates.passwordHash !== undefined) data.passwordHash = updates.passwordHash;
     if (updates.emailVerified !== undefined) data.emailVerified = updates.emailVerified;

@@ -3,6 +3,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { AuthPortal, AuthToken, AuthTokenType, User } from '../../domain/types.js';
 import { db } from '../../infrastructure/database.js';
 import { emailService, EmailSendResult } from '../../infrastructure/email.service.js';
+import { getValidatedEnv } from '../../infrastructure/env.schema.js';
 import { resolveOptionalAuthUser } from '../../infrastructure/auth.guard.js';
 import { BRAND_MEMBER_ROLE_CODES, PLATFORM_ADMIN_ROLE_CODES } from '../../modules/rbac/rbac.catalog.js';
 import {
@@ -12,7 +13,9 @@ import {
   wantsCookieOnlyTransport,
 } from '../../infrastructure/auth_cookies.js';
 import {
+  consumeOAuthExchangeCode,
   issueSessionTokens,
+  resolveUserFromClaims,
   revokeUserSession,
   rotateRefreshSession,
 } from '../../modules/auth/jwt.verifier.js';
@@ -85,6 +88,94 @@ export async function issuePortalAuthSession(
       },
     },
   };
+}
+
+export interface VerifiedGoogleProfile {
+  email: string;
+  name: string;
+  picture?: string;
+}
+
+/**
+ * Verifies a Google OIDC id_token against Google tokeninfo and configured audience.
+ */
+export async function verifyGoogleIdToken(
+  idToken: string,
+  fallbackName?: string,
+  defaultLabel = 'User',
+): Promise<
+  | { ok: true; profile: VerifiedGoogleProfile }
+  | { ok: false; status: number; error: string; message: string }
+> {
+  const trimmed = idToken.trim();
+  if (!trimmed) {
+    return { ok: false, status: 401, error: 'Unauthorized', message: 'Valid Google ID token is required.' };
+  }
+
+  let tokenInfo: Record<string, any>;
+  try {
+    const verifyRes = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(trimmed)}`);
+    if (!verifyRes.ok) {
+      return { ok: false, status: 401, error: 'Unauthorized', message: 'Invalid Google ID token.' };
+    }
+    tokenInfo = (await verifyRes.json()) as Record<string, any>;
+  } catch {
+    return { ok: false, status: 502, error: 'UpstreamError', message: 'Unable to verify Google ID token.' };
+  }
+
+  const expectedClientId = getValidatedEnv().GOOGLE_CLIENT_ID.trim();
+  if (expectedClientId && tokenInfo.aud !== expectedClientId) {
+    return { ok: false, status: 403, error: 'Forbidden', message: 'Google token audience mismatch.' };
+  }
+
+  const emailVerified = tokenInfo.email_verified === true || tokenInfo.email_verified === 'true';
+  const email = typeof tokenInfo.email === 'string' ? normalizeEmail(tokenInfo.email) : '';
+  const cleanFallback = typeof fallbackName === 'string' ? fallbackName.trim() : '';
+  const name =
+    (typeof tokenInfo.name === 'string' && tokenInfo.name.trim()) ||
+    cleanFallback ||
+    email.split('@')[0] ||
+    defaultLabel;
+
+  if (!emailVerified || !email || !isValidEmail(email)) {
+    return { ok: false, status: 400, error: 'ValidationError', message: 'Verified Google email required.' };
+  }
+
+  const picture = typeof tokenInfo.picture === 'string' && tokenInfo.picture.trim() ? tokenInfo.picture.trim() : undefined;
+  return { ok: true, profile: { email, name, picture } };
+}
+
+/**
+ * Claims a single-use OAuth exchange code bound to a specific portal and resolves its domain user.
+ */
+export async function claimPortalOAuthExchangeCode(
+  code: string,
+  expectedPortal: AuthPortal,
+): Promise<
+  | { ok: true; user: User; deviceLabel?: string }
+  | { ok: false; status: number; error: string; message: string }
+> {
+  const cleanCode = code.trim();
+  if (!cleanCode) {
+    return { ok: false, status: 400, error: 'ValidationError', message: 'Exchange code is required.' };
+  }
+
+  const claimed = await consumeOAuthExchangeCode(cleanCode);
+  if (!claimed || claimed.portal !== expectedPortal) {
+    return {
+      ok: false,
+      status: 401,
+      error: 'InvalidExchangeCode',
+      message: 'OAuth handoff code is invalid or expired.',
+    };
+  }
+
+  const user = await resolveUserFromClaims({ userId: claimed.userId, authSource: 'fastify_jwt' });
+  if (!user) {
+    return { ok: false, status: 403, error: 'Forbidden', message: 'Account not found.' };
+  }
+
+  return { ok: true, user, deviceLabel: claimed.deviceLabel };
 }
 
 function resolvePortal(requestedPortal: unknown, fallback: AuthPortal): AuthPortal {

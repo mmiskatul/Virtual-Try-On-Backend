@@ -481,6 +481,146 @@ async function runAuthTests() {
   assert(/Max-Age=0/i.test(clearedSessionCookies.vtry_mkt_access?.raw || ''), '/session mismatch clears vtry_mkt_access');
   assert(/Max-Age=0/i.test(clearedSessionCookies.vtry_mkt_sid?.raw || ''), '/session mismatch clears vtry_mkt_sid');
 
+  // --- 9. Brand Google OAuth & Single-Use Cookie Handoff ---
+  console.log('\n--- [9. Brand Google OAuth & Cookie Exchange] ---');
+  const originalFetch = globalThis.fetch;
+  try {
+    const missingTokenRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/oauth-google',
+      headers: { 'x-auth-portal': 'brand', 'x-auth-transport': 'cookie' },
+      payload: {},
+    });
+    assert(missingTokenRes.statusCode === 401, 'Brand Google OAuth rejects missing idToken with 401');
+
+    // Mock Google tokeninfo verification cleanly for isolated unit test
+    const expectedAud = process.env.GOOGLE_CLIENT_ID || '';
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (urlStr.startsWith('https://oauth2.googleapis.com/tokeninfo')) {
+        const parsed = new URL(urlStr);
+        const tok = parsed.searchParams.get('id_token') || '';
+        if (tok === 'tok_wrong_audience') {
+          return new Response(
+            JSON.stringify({ email: 'aud.mismatch@gmail.com', email_verified: true, name: 'Wrong Aud', aud: 'wrong-client-id.apps.googleusercontent.com' }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (tok === 'tok_customer_account') {
+          return new Response(
+            JSON.stringify({ email: 'sarah.miller@example.com', email_verified: true, name: 'Sarah Miller', ...(expectedAud ? { aud: expectedAud } : {}) }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (tok === 'tok_new_brand_google') {
+          return new Response(
+            JSON.stringify({ email: 'aria.atelier@gmail.com', email_verified: true, name: 'Aria Laurent', ...(expectedAud ? { aud: expectedAud } : {}) }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (tok === 'tok_suspended_brand') {
+          return new Response(
+            JSON.stringify({ email: 'elena@auraatelier.com', email_verified: true, name: 'Elena Vance', ...(expectedAud ? { aud: expectedAud } : {}) }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        return new Response(JSON.stringify({ error: 'invalid_token' }), { status: 400 });
+      }
+      return originalFetch(input, init);
+    }) as typeof fetch;
+
+    if (expectedAud) {
+      const wrongAudRes = await app.inject({
+        method: 'POST',
+        url: '/api/v1/auth/oauth-google',
+        headers: { 'x-auth-portal': 'brand', 'x-auth-transport': 'cookie' },
+        payload: { idToken: 'tok_wrong_audience' },
+      });
+      assert(wrongAudRes.statusCode === 403 && JSON.parse(wrongAudRes.body).error === 'Forbidden', 'Rejects mismatched Google token audience');
+    }
+
+    const mismatchRoleRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/oauth-google',
+      headers: { 'x-auth-portal': 'brand', 'x-auth-transport': 'cookie' },
+      payload: { idToken: 'tok_customer_account' },
+    });
+    assert(mismatchRoleRes.statusCode === 403, 'Customer email rejected on Brand Google OAuth');
+    assert(JSON.parse(mismatchRoleRes.body).error === 'PortalMismatch', 'PortalMismatch error returned for customer email');
+
+    const newBrandGoogleRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/oauth-google',
+      headers: { 'x-auth-portal': 'brand', 'x-auth-transport': 'cookie' },
+      payload: { idToken: 'tok_new_brand_google' },
+    });
+    assert(newBrandGoogleRes.statusCode === 200, 'First-time Google user creates brand owner + tenant');
+    const newBrandGoogleBody = JSON.parse(newBrandGoogleRes.body);
+    assert(newBrandGoogleBody.isNewBrand === true, 'Brand Google OAuth flags newly created workspace');
+    assert(newBrandGoogleBody.user?.role === 'BRAND_OWNER', 'Brand Google OAuth assigns BRAND_OWNER role');
+    assert(Boolean(newBrandGoogleBody.user?.emailVerified), 'Brand Google OAuth marks emailVerified true');
+    assert(Boolean(newBrandGoogleBody.tenant?.id && newBrandGoogleBody.tenant?.slug), 'Brand Google OAuth provisions tenant & slug');
+    assert(Boolean(newBrandGoogleBody.oauthExchangeCode), 'Brand Google OAuth returns single-use oauthExchangeCode');
+    assert(newBrandGoogleBody.token === undefined, 'Cookie transport omits raw access token from oauth-google response');
+
+    // Cross-portal exchange attempt must fail without consuming valid code? Note: claim deletes? Wait: let's test wrong portal after valid OR check
+    // Note: consumeOAuthExchangeCode deletes the key when retrieved, so test valid brand exchange directly first, then replay!
+    const exchangeRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/oauth-exchange',
+      headers: { 'x-auth-portal': 'brand', 'x-auth-transport': 'cookie' },
+      payload: { code: newBrandGoogleBody.oauthExchangeCode },
+    });
+    assert(exchangeRes.statusCode === 200, 'Brand oauth-exchange accepts valid one-time code');
+    const exchangedCookies = extractSetCookies(exchangeRes.headers['set-cookie']);
+    for (const cname of ['vtry_brand_access', 'vtry_brand_refresh', 'vtry_brand_sid']) {
+      assert(Boolean(exchangedCookies[cname]?.value), `Brand oauth-exchange sets ${cname} cookie`);
+      assert(/;\s*HttpOnly/i.test(exchangedCookies[cname]?.raw || ''), `Brand oauth-exchange ${cname} has HttpOnly flag`);
+    }
+
+    const meAfterExchange = await app.inject({
+      method: 'GET',
+      url: '/api/v1/auth/me',
+      headers: {
+        cookie: `vtry_brand_access=${encodeURIComponent(exchangedCookies.vtry_brand_access?.value || '')}; vtry_brand_sid=${encodeURIComponent(exchangedCookies.vtry_brand_sid?.value || '')}`,
+        'x-auth-portal': 'brand',
+      },
+    });
+    assert(meAfterExchange.statusCode === 200, 'Exchanged HttpOnly cookies authenticate GET /api/v1/auth/me');
+    assert(JSON.parse(meAfterExchange.body).user?.email === 'aria.atelier@gmail.com', 'Authenticated Google user matches profile');
+
+    const replayExchange = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/oauth-exchange',
+      headers: { 'x-auth-portal': 'brand', 'x-auth-transport': 'cookie' },
+      payload: { code: newBrandGoogleBody.oauthExchangeCode },
+    });
+    assert(replayExchange.statusCode === 401, 'Replayed Brand oauthExchangeCode is rejected');
+
+    // Returning brand user logs into existing tenant cleanly
+    const returningGoogleRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/oauth-google',
+      headers: { 'x-auth-portal': 'brand', 'x-auth-transport': 'cookie' },
+      payload: { idToken: 'tok_new_brand_google' },
+    });
+    const returningBody = JSON.parse(returningGoogleRes.body);
+    assert(returningGoogleRes.statusCode === 200 && returningBody.isNewBrand === false, 'Returning Google user signs into existing brand');
+    assert(returningBody.tenant?.id === newBrandGoogleBody.tenant?.id, 'Returning Google user retains exact tenantId');
+
+    // Suspended brand tenant blocked from Google sign-in
+    db.updateTenant('tenant_aura', { status: 'SUSPENDED' });
+    const suspendedGoogleRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/oauth-google',
+      headers: { 'x-auth-portal': 'brand', 'x-auth-transport': 'cookie' },
+      payload: { idToken: 'tok_suspended_brand' },
+    });
+    assert(suspendedGoogleRes.statusCode === 403 && JSON.parse(suspendedGoogleRes.body).error === 'TenantSuspended', 'Suspended brand blocked on Google OAuth');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
   // Reset snapshot cleanly back to baseline demo data
   db.reset();
   seedTestUsers();
