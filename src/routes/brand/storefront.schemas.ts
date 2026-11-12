@@ -70,19 +70,35 @@ export const SocialLinksInputSchema = z
   })
   .strict();
 
+export const ButtonStyleSchema = z.enum(['pill', 'rounded', 'square']);
+
 export const StorefrontSettingsInputSchema = z
   .object({
     primaryColor: HexColorSchema.optional(),
+    secondaryColor: HexColorSchema.optional(),
     accentColor: HexColorSchema.optional(),
+    backgroundColor: HexColorSchema.optional(),
+    textColor: HexColorSchema.optional(),
+    headingFont: z.string().trim().min(1).max(80).optional(),
+    bodyFont: z.string().trim().min(1).max(80).optional(),
+    buttonStyle: ButtonStyleSchema.optional(),
     headerStyle: HeaderStyleSchema.optional(),
     announcement: z.string().trim().max(300).optional(),
     aboutText: z.string().trim().max(4000).optional(),
     bannerImage: SafeImageAssetSchema.optional(),
+    lightLogoUrl: SafeImageAssetSchema.optional(),
+    socialImageUrl: SafeImageAssetSchema.optional(),
     onboardingCompleted: z.boolean().optional(),
     onboardingCompletedAt: z.number().finite().optional(),
     storefrontTitle: z.string().trim().max(160).optional(),
     slogan: z.string().trim().max(240).optional(),
     shortDescription: z.string().trim().max(600).optional(),
+    establishedYear: z
+      .string()
+      .trim()
+      .regex(/^(\d{4})?$/, 'Established year must be a 4-digit year (e.g. 2022).')
+      .optional(),
+    registrationNumber: z.string().trim().max(120).optional(),
     categoryFocus: z.string().trim().max(300).optional(),
     categories: z.array(z.string().trim().min(1).max(80)).max(20).optional(),
     ownerName: z.string().trim().max(120).optional(),
@@ -175,17 +191,27 @@ export const CreateProductInputSchema = z.object({
 export const StorefrontSettingsOutputSchema = z
   .object({
     primaryColor: z.string().optional(),
+    secondaryColor: z.string().optional(),
     accentColor: z.string().optional(),
+    backgroundColor: z.string().optional(),
+    textColor: z.string().optional(),
+    headingFont: z.string().optional(),
+    bodyFont: z.string().optional(),
+    buttonStyle: ButtonStyleSchema.optional(),
     headerStyle: HeaderStyleSchema.optional(),
     announcement: z.string().optional(),
     aboutText: z.string().optional(),
     bannerImage: z.string().optional(),
+    lightLogoUrl: z.string().optional(),
+    socialImageUrl: z.string().optional(),
     onboardingCompleted: z.boolean().optional(),
     onboardingCompletedAt: z.number().optional(),
     overviewChecklistIds: z.array(z.string()).optional(),
     storefrontTitle: z.string().optional(),
     slogan: z.string().optional(),
     shortDescription: z.string().optional(),
+    establishedYear: z.string().optional(),
+    registrationNumber: z.string().optional(),
     categoryFocus: z.string().optional(),
     categories: z.array(z.string()).optional(),
     ownerName: z.string().optional(),

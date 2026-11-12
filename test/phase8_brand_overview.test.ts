@@ -250,4 +250,63 @@ describe('Phase 8: Brand Overview Endpoints, Validation & Tenant Isolation', () 
     });
     expect(emptyPayload.statusCode).toBe(400);
   });
+
+  it('persists extended brand verification, theme tokens, and supplemental logos on PUT /api/v1/brand/profile with Zod validation', async () => {
+    const updateRes = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/brand/profile',
+      headers: { Authorization: `Bearer ${auraToken}` },
+      payload: {
+        storefrontSettings: {
+          establishedYear: '2021',
+          secondaryColor: '#334155',
+          backgroundColor: '#FAF9F6',
+          textColor: '#0F172A',
+          headingFont: 'Cormorant Garamond',
+          bodyFont: 'Plus Jakarta Sans',
+          buttonStyle: 'pill',
+          lightLogoUrl: 'https://cdn.example.com/aura-light-logo.png',
+          socialImageUrl: 'https://cdn.example.com/aura-og-cover.jpg',
+          socialLinks: {
+            instagram: '@aura.atelier',
+            website: 'https://auraatelier.com',
+          },
+        },
+      },
+    });
+    expect(updateRes.statusCode).toBe(200);
+    const updatedTenant = JSON.parse(updateRes.body).tenant;
+    expect(updatedTenant.storefrontSettings.establishedYear).toBe('2021');
+    expect(updatedTenant.storefrontSettings.secondaryColor).toBe('#334155');
+    expect(updatedTenant.storefrontSettings.backgroundColor).toBe('#FAF9F6');
+    expect(updatedTenant.storefrontSettings.textColor).toBe('#0F172A');
+    expect(updatedTenant.storefrontSettings.headingFont).toBe('Cormorant Garamond');
+    expect(updatedTenant.storefrontSettings.buttonStyle).toBe('pill');
+    expect(updatedTenant.storefrontSettings.lightLogoUrl).toBe('https://cdn.example.com/aura-light-logo.png');
+    expect(updatedTenant.storefrontSettings.socialImageUrl).toBe('https://cdn.example.com/aura-og-cover.jpg');
+
+    const getRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/brand/profile',
+      headers: { Authorization: `Bearer ${auraToken}` },
+    });
+    expect(getRes.statusCode).toBe(200);
+    const fetchedTenant = JSON.parse(getRes.body).tenant;
+    expect(fetchedTenant.storefrontSettings.lightLogoUrl).toBe('https://cdn.example.com/aura-light-logo.png');
+    expect(fetchedTenant.storefrontSettings.establishedYear).toBe('2021');
+
+    const invalidYear = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/brand/profile',
+      headers: { Authorization: `Bearer ${auraToken}` },
+      payload: {
+        storefrontSettings: {
+          establishedYear: 'abcd',
+          secondaryColor: 'not-a-hex',
+        },
+      },
+    });
+    expect(invalidYear.statusCode).toBe(400);
+    expect(JSON.parse(invalidYear.body).error).toBe('ValidationError');
+  });
 });

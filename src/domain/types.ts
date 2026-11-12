@@ -22,17 +22,27 @@ export type StorefrontHeaderStyle = (typeof STOREFRONT_HEADER_STYLES)[number];
 
 export interface StorefrontSettings {
   primaryColor?: string;
+  secondaryColor?: string;
   accentColor?: string;
+  backgroundColor?: string;
+  textColor?: string;
+  headingFont?: string;
+  bodyFont?: string;
+  buttonStyle?: 'pill' | 'rounded' | 'square';
   headerStyle?: StorefrontHeaderStyle;
   announcement?: string;
   aboutText?: string;
   bannerImage?: string;
+  lightLogoUrl?: string;
+  socialImageUrl?: string;
   onboardingCompleted?: boolean;
   onboardingCompletedAt?: number;
   overviewChecklistIds?: string[];
   storefrontTitle?: string;
   slogan?: string;
   shortDescription?: string;
+  establishedYear?: string;
+  registrationNumber?: string;
   categoryFocus?: string;
   categories?: string[];
   ownerName?: string;
