@@ -23,9 +23,19 @@ function isSafeHttpUrl(url: unknown): url is string {
   }
 }
 
+const SAFE_DATA_IMAGE_RE = /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/i;
+const ALLOWED_HEADER_STYLES = new Set(['split', 'minimal', 'centered', 'cover'] as const);
+
+function isSafeImageAssetUrl(url: unknown): url is string {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+  return (trimmed.length <= 2_500_000 && SAFE_DATA_IMAGE_RE.test(trimmed)) || isSafeHttpUrl(trimmed);
+}
+
 type StorefrontTextField = Exclude<
   keyof StorefrontSettings,
-  'primaryColor' | 'accentColor' | 'bannerImage' | 'onboardingCompleted' | 'onboardingCompletedAt' | 'socialLinks' | 'categories'
+  'primaryColor' | 'accentColor' | 'headerStyle' | 'bannerImage' | 'onboardingCompleted' | 'onboardingCompletedAt' | 'socialLinks' | 'categories'
 >;
 
 const STOREFRONT_TEXT_FIELD_LIMITS: ReadonlyArray<[StorefrontTextField, number]> = [
@@ -53,6 +63,9 @@ function sanitizeStorefrontSettings(raw: any, existing?: StorefrontSettings): St
   if (typeof raw?.accentColor === 'string' && /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6})$/.test(raw.accentColor.trim())) {
     next.accentColor = raw.accentColor.trim();
   }
+  if (typeof raw?.headerStyle === 'string' && ALLOWED_HEADER_STYLES.has(raw.headerStyle.trim() as any)) {
+    next.headerStyle = raw.headerStyle.trim() as StorefrontSettings['headerStyle'];
+  }
   for (const [field, maxLen] of STOREFRONT_TEXT_FIELD_LIMITS) {
     if (typeof raw?.[field] === 'string') {
       next[field] = raw[field].trim().slice(0, maxLen);
@@ -61,7 +74,9 @@ function sanitizeStorefrontSettings(raw: any, existing?: StorefrontSettings): St
   if (typeof next.currency === 'string' && next.currency.trim()) {
     next.currency = 'BDT';
   }
-  if (isSafeHttpUrl(raw?.bannerImage)) {
+  if (typeof raw?.bannerImage === 'string' && !raw.bannerImage.trim()) {
+    next.bannerImage = '';
+  } else if (isSafeImageAssetUrl(raw?.bannerImage)) {
     next.bannerImage = raw.bannerImage.trim();
   }
   if (Array.isArray(raw?.categories)) {
@@ -120,8 +135,16 @@ export async function brandStorefrontRoutes(app: FastifyInstance) {
         : request.tenant.contactEmail,
       storefrontSettings: sanitizeStorefrontSettings(body.storefrontSettings, request.tenant.storefrontSettings),
     };
-    if (isSafeHttpUrl(body.logoUrl)) updates.logoUrl = body.logoUrl.trim();
-    if (isSafeHttpUrl(body.bannerUrl)) updates.bannerUrl = body.bannerUrl.trim();
+    if (typeof body.logoUrl === 'string' && !body.logoUrl.trim()) {
+      updates.logoUrl = '';
+    } else if (isSafeImageAssetUrl(body.logoUrl)) {
+      updates.logoUrl = body.logoUrl.trim();
+    }
+    if (typeof body.bannerUrl === 'string' && !body.bannerUrl.trim()) {
+      updates.bannerUrl = '';
+    } else if (isSafeImageAssetUrl(body.bannerUrl)) {
+      updates.bannerUrl = body.bannerUrl.trim();
+    }
 
     const updated = db.updateTenant(request.tenant.id, updates);
     return { message: 'Brand profile updated successfully', tenant: updated };

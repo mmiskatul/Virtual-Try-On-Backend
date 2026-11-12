@@ -10,6 +10,7 @@ export type SubscriptionPlan = 'STARTER' | 'PRO' | 'ENTERPRISE';
 export interface StorefrontSettings {
   primaryColor?: string;
   accentColor?: string;
+  headerStyle?: 'split' | 'minimal' | 'centered' | 'cover';
   announcement?: string;
   aboutText?: string;
   bannerImage?: string;
