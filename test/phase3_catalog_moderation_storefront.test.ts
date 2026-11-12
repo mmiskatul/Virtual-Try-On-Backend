@@ -147,6 +147,8 @@ describe('Phase 3: Catalog, Variants, Dual Publication, Storefront & Moderation'
           storefrontTitle: 'Veloura Official Flagship',
           slogan: 'Tailored Fit Preview',
           shortDescription: 'Architectural outerwear built for AI try-on.',
+          categoryFocus: "Women's Wear, Casual Wear",
+          categories: ["Women's Wear", 'Casual Wear'],
           ownerName: 'Founder Test',
           legalName: 'Veloura House Ltd.',
           businessType: 'Fashion House / D2C Brand',
@@ -205,6 +207,7 @@ describe('Phase 3: Catalog, Variants, Dual Publication, Storefront & Moderation'
     expect(typeof reloadedSettings.onboardingCompletedAt).toBe('number');
     expect(reloadedSettings.storefrontTitle).toBe('Veloura Official Flagship');
     expect(reloadedSettings.legalName).toBe('Veloura House Ltd.');
+    expect(reloadedSettings.categories).toEqual(["Women's Wear", 'Casual Wear']);
     expect(reloadedSettings.primaryColor).toBe('#1E3A8A');
     expect(reloadedSettings.socialLinks?.instagram).toBe('@velouratest');
 

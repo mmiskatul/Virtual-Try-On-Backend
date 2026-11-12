@@ -19,7 +19,7 @@ const AdminPlanUpsertSchema = z.object({
   description: z.string().default(''),
   monthlyPrice: z.number().nonnegative(),
   annualPrice: z.number().nonnegative(),
-  currency: z.string().default('USD'),
+  currency: z.string().default('BDT').transform(() => 'BDT'),
   trialDays: z.number().int().min(0).default(14),
   publicVisible: z.boolean().default(true),
   entitlements: z

@@ -25,7 +25,7 @@ function isSafeHttpUrl(url: unknown): url is string {
 
 type StorefrontTextField = Exclude<
   keyof StorefrontSettings,
-  'primaryColor' | 'accentColor' | 'bannerImage' | 'onboardingCompleted' | 'onboardingCompletedAt' | 'socialLinks'
+  'primaryColor' | 'accentColor' | 'bannerImage' | 'onboardingCompleted' | 'onboardingCompletedAt' | 'socialLinks' | 'categories'
 >;
 
 const STOREFRONT_TEXT_FIELD_LIMITS: ReadonlyArray<[StorefrontTextField, number]> = [
@@ -34,7 +34,7 @@ const STOREFRONT_TEXT_FIELD_LIMITS: ReadonlyArray<[StorefrontTextField, number]>
   ['storefrontTitle', 160],
   ['slogan', 200],
   ['shortDescription', 320],
-  ['categoryFocus', 120],
+  ['categoryFocus', 240],
   ['ownerName', 120],
   ['legalName', 160],
   ['businessType', 80],
@@ -58,8 +58,22 @@ function sanitizeStorefrontSettings(raw: any, existing?: StorefrontSettings): St
       next[field] = raw[field].trim().slice(0, maxLen);
     }
   }
+  if (typeof next.currency === 'string' && next.currency.trim()) {
+    next.currency = 'BDT';
+  }
   if (isSafeHttpUrl(raw?.bannerImage)) {
     next.bannerImage = raw.bannerImage.trim();
+  }
+  if (Array.isArray(raw?.categories)) {
+    const cleaned = Array.from(
+      new Set<string>(
+        raw.categories
+          .filter((item: unknown): item is string => typeof item === 'string')
+          .map((item: string) => item.trim().slice(0, 48))
+          .filter(Boolean)
+      )
+    ).slice(0, 12);
+    next.categories = cleaned;
   }
   if (typeof raw?.onboardingCompleted === 'boolean') {
     next.onboardingCompleted = raw.onboardingCompleted;

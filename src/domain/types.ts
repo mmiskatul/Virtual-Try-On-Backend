@@ -19,6 +19,7 @@ export interface StorefrontSettings {
   slogan?: string;
   shortDescription?: string;
   categoryFocus?: string;
+  categories?: string[];
   ownerName?: string;
   legalName?: string;
   businessType?: string;

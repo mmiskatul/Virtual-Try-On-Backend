@@ -391,7 +391,7 @@ export class Database {
       storefrontSettings: {
         primaryColor: '#0f172a',
         accentColor: '#38bdf8',
-        announcement: 'Free worldwide express shipping on orders over $150',
+        announcement: 'Free nationwide express shipping on orders over ৳1,500',
         aboutText: 'Crafted for those who value quiet luxury and sustainable elegance.'
       },
       createdAt: now,

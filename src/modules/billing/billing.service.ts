@@ -67,7 +67,7 @@ const DEFAULT_PLANS: PlanDto[] = [
     description: 'Essential virtual try-on & storefront tools for boutique fashion brands.',
     monthlyPrice: 49,
     annualPrice: 470,
-    currency: 'USD',
+    currency: 'BDT',
     trialDays: 14,
     publicVisible: true,
     entitlements: [
@@ -84,7 +84,7 @@ const DEFAULT_PLANS: PlanDto[] = [
     description: 'High-fidelity VTON models, marketplace featuring, and team collaboration.',
     monthlyPrice: 149,
     annualPrice: 1430,
-    currency: 'USD',
+    currency: 'BDT',
     trialDays: 14,
     publicVisible: true,
     entitlements: [
@@ -101,7 +101,7 @@ const DEFAULT_PLANS: PlanDto[] = [
     description: 'Dedicated high-throughput GPU routing, multi-brand staff RBAC, and SLAs.',
     monthlyPrice: 499,
     annualPrice: 4790,
-    currency: 'USD',
+    currency: 'BDT',
     trialDays: 30,
     publicVisible: true,
     entitlements: [
@@ -195,7 +195,7 @@ export class BillingCreditService {
             description: r.description || '',
             monthlyPrice: Number(r.monthlyPrice),
             annualPrice: Number(r.annualPrice),
-            currency: r.currency,
+            currency: 'BDT',
             trialDays: r.trialDays,
             publicVisible: r.publicVisible,
             entitlements: (r.entitlements || []).map((e: any) => ({

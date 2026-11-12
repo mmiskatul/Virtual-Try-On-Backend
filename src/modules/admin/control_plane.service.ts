@@ -599,7 +599,7 @@ export class AdminControlPlaneService {
       orderId: input.orderId,
       tenantId: input.tenantId,
       amount: input.amount,
-      currency: 'USD',
+      currency: 'BDT',
       reason: input.reason,
       status: 'PROCESSED',
       createdAt: new Date().toISOString(),
