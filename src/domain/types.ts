@@ -7,10 +7,23 @@ export type OrderStatus = 'PENDING' | 'PROCESSING' | 'SHIPPED' | 'DELIVERED' | '
 export type PaymentStatus = 'PENDING' | 'PAID' | 'FAILED' | 'REFUNDED';
 export type SubscriptionPlan = 'STARTER' | 'PRO' | 'ENTERPRISE';
 
+export const STOREFRONT_HEADER_STYLES = [
+  'split',
+  'split-reverse',
+  'minimal',
+  'centered',
+  'cover',
+  'magazine',
+  'grid-showcase',
+  'noir-boutique',
+] as const;
+
+export type StorefrontHeaderStyle = (typeof STOREFRONT_HEADER_STYLES)[number];
+
 export interface StorefrontSettings {
   primaryColor?: string;
   accentColor?: string;
-  headerStyle?: 'split' | 'minimal' | 'centered' | 'cover';
+  headerStyle?: StorefrontHeaderStyle;
   announcement?: string;
   aboutText?: string;
   bannerImage?: string;

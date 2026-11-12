@@ -8,6 +8,13 @@ import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
 import { Product, ProductVariant } from '../../domain/types.js';
 import { idempotencyManager } from '../../infrastructure/idempotency.js';
 import { catalogRepository } from '../../modules/catalog/catalog.repository.js';
+import {
+  CreateProductInputSchema,
+  ProductCreateResponseSchema,
+  ProductListResponseSchema,
+  formatZodValidationError,
+  validateZodOutput,
+} from './storefront.schemas.js';
 
 const brandReadGuards = createBrandMiddleware(requirePermission('brand:products', 'read'));
 const brandWriteGuards = createBrandMiddleware(requirePermission('brand:products', 'write'));
@@ -18,21 +25,22 @@ export async function brandProductRoutes(app: FastifyInstance) {
   app.get('/api/v1/products', { preHandler: brandReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
     const products = db.getProductsByTenant(request.tenant.id);
-    return { products };
+    return validateZodOutput(
+      ProductListResponseSchema,
+      { products },
+      'GET /api/v1/products'
+    );
   });
 
   // Create Product
   app.post('/api/v1/products', { preHandler: brandWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
-    const body = request.body as any;
-    const { name, category, price, sku, variants, isTryOnEligible, tryOnCategory } = body || {};
-
-    if (!name || !category || price === undefined || !sku || Number(price) < 0 || !Number.isFinite(Number(price))) {
-      return reply.status(400).send({
-        error: 'ValidationError',
-        message: 'name, category, non-negative price, and sku are required.'
-      });
+    const parsedBody = CreateProductInputSchema.safeParse(request.body ?? {});
+    if (!parsedBody.success) {
+      return reply.status(400).send(formatZodValidationError(parsedBody.error));
     }
+    const body = parsedBody.data;
+    const { name, category, price, sku, variants, isTryOnEligible, tryOnCategory } = body;
 
     const tenantId = request.tenant.id;
     const idempotencyKey = (request.headers['idempotency-key'] || request.headers['x-idempotency-key']) as string | undefined;
@@ -74,10 +82,20 @@ export async function brandProductRoutes(app: FastifyInstance) {
     const baseSlug = name.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-');
     const slug = `${baseSlug}-${Math.random().toString(36).substring(2, 6)}`;
 
-    const defaultVariants: ProductVariant[] = variants && variants.length > 0 ? variants : [
-      { id: `v_${Date.now()}_1`, sku: `${sku}-S`, size: 'S', color: 'Default', stockQuantity: 10, available: true },
-      { id: `v_${Date.now()}_2`, sku: `${sku}-M`, size: 'M', color: 'Default', stockQuantity: 15, available: true }
-    ];
+    const defaultVariants: ProductVariant[] =
+      variants && variants.length > 0
+        ? variants.map((v, idx) => ({
+            id: v.id || `v_${Date.now()}_${idx + 1}`,
+            sku: v.sku,
+            size: v.size,
+            color: v.color,
+            stockQuantity: v.stockQuantity,
+            available: v.available,
+          }))
+        : [
+            { id: `v_${Date.now()}_1`, sku: `${sku}-S`, size: 'S', color: 'Default', stockQuantity: 10, available: true },
+            { id: `v_${Date.now()}_2`, sku: `${sku}-M`, size: 'M', color: 'Default', stockQuantity: 15, available: true },
+          ];
 
     const now = Date.now();
     const product: Product = {
@@ -91,8 +109,8 @@ export async function brandProductRoutes(app: FastifyInstance) {
       collection: body.collection || '',
       sku,
       price: Number(price),
-      compareAtPrice: body.compareAtPrice ? Number(body.compareAtPrice) : undefined,
-      images: body.images || ['https://images.unsplash.com/photo-1515372039744-b8f02a3ae446?w=800'],
+      compareAtPrice: body.compareAtPrice !== undefined ? Number(body.compareAtPrice) : undefined,
+      images: (body.images || []).filter(Boolean),
       fabricIds: body.fabricIds || [],
       tags: body.tags || [],
       brandStorefrontPublished: body.brandStorefrontPublished ?? true,
@@ -111,7 +129,11 @@ export async function brandProductRoutes(app: FastifyInstance) {
       });
       await catalogRepository.syncProductRelations(created);
 
-      const responsePayload = { message: 'Product created successfully', product: created };
+      const responsePayload = validateZodOutput(
+        ProductCreateResponseSchema,
+        { message: 'Product created successfully', product: created },
+        'POST /api/v1/products'
+      );
 
       if (compositeKey) {
         idempotencyManager.completeOperation(compositeKey, 201, responsePayload);

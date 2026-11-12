@@ -1,10 +1,12 @@
 import './setup_env.js';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { db } from '../src/infrastructure/database.js';
 import { createApp } from '../src/server.js';
 import { seedTestUsers } from './helpers.js';
 
 describe('Phase 3: Catalog, Variants, Dual Publication, Storefront & Moderation', () => {
   beforeAll(() => {
+    db.reset();
     seedTestUsers();
   });
 
@@ -210,6 +212,121 @@ describe('Phase 3: Catalog, Variants, Dual Publication, Storefront & Moderation'
     expect(reloadedSettings.categories).toEqual(["Women's Wear", 'Casual Wear']);
     expect(reloadedSettings.primaryColor).toBe('#1E3A8A');
     expect(reloadedSettings.socialLinks?.instagram).toBe('@velouratest');
+
+    await app.close();
+  });
+
+  it('validates onboarding storefront styles, media uploads, and product inputs and outputs with Zod', async () => {
+    const app = createApp('all');
+    const loginRes = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      payload: { email: 'elena@auraatelier.com', password: 'Test-Brand-Pass-1' },
+    });
+    expect(loginRes.statusCode).toBe(200);
+    const brandToken = JSON.parse(loginRes.body).token;
+
+    // 1. Accept all 8 supported storefront header designs (including split-reverse, magazine, grid-showcase, noir-boutique)
+    for (const style of [
+      'split',
+      'split-reverse',
+      'minimal',
+      'centered',
+      'cover',
+      'magazine',
+      'grid-showcase',
+      'noir-boutique',
+    ] as const) {
+      const okPut = await app.inject({
+        method: 'PUT',
+        url: '/api/v1/brand/storefront-settings',
+        headers: { Authorization: `Bearer ${brandToken}` },
+        payload: {
+          headerStyle: style,
+          primaryColor: '#0F172A',
+          accentColor: '#C2410C',
+          currency: 'BDT',
+        },
+      });
+      expect(okPut.statusCode).toBe(200);
+      const body = JSON.parse(okPut.body);
+      expect(body.tenant.storefrontSettings.headerStyle).toBe(style);
+      expect(body.tenant.storefrontSettings.currency).toBe('BDT');
+    }
+
+    // Check public storefront output also validates cleanly and omits contactEmail
+    const publicRes = await app.inject({
+      method: 'GET',
+      url: '/api/v1/internal/storefront/aura-atelier',
+    });
+    expect(publicRes.statusCode).toBe(200);
+    const publicJson = JSON.parse(publicRes.body);
+    expect(publicJson.tenant.storefrontSettings.headerStyle).toBe('noir-boutique');
+    expect(publicJson.tenant.contactEmail).toBeUndefined();
+
+    // 2. Reject invalid headerStyle, malformed color, and unsafe logoUrl
+    const badStyle = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/brand/storefront-settings',
+      headers: { Authorization: `Bearer ${brandToken}` },
+      payload: { headerStyle: 'invalid-layout' },
+    });
+    expect(badStyle.statusCode).toBe(400);
+    expect(JSON.parse(badStyle.body).error).toBe('ValidationError');
+
+    const badColor = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/brand/storefront-settings',
+      headers: { Authorization: `Bearer ${brandToken}` },
+      payload: { primaryColor: 'not-a-hex' },
+    });
+    expect(badColor.statusCode).toBe(400);
+    expect(JSON.parse(badColor.body).error).toBe('ValidationError');
+
+    const badLogo = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/brand/profile',
+      headers: { Authorization: `Bearer ${brandToken}` },
+      payload: { logoUrl: 'javascript:alert(1)' },
+    });
+    expect(badLogo.statusCode).toBe(400);
+    expect(JSON.parse(badLogo.body).error).toBe('ValidationError');
+
+    // 3. Validate upload input (reject SVG script URI, accept PNG base64) & verify output shape
+    const badUpload = await app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads',
+      headers: { Authorization: `Bearer ${brandToken}` },
+      payload: { imageBase64: 'data:image/svg+xml;base64,PHN2Zy8+' },
+    });
+    expect(badUpload.statusCode).toBe(400);
+    expect(JSON.parse(badUpload.body).error).toBe('ValidationError');
+
+    const goodUpload = await app.inject({
+      method: 'POST',
+      url: '/api/v1/uploads',
+      headers: { Authorization: `Bearer ${brandToken}` },
+      payload: {
+        imageBase64:
+          'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+        filename: 'logo.png',
+      },
+    });
+    expect(goodUpload.statusCode).toBe(201);
+    const uploadJson = JSON.parse(goodUpload.body);
+    expect(uploadJson.success).toBe(true);
+    expect(uploadJson.mimeType).toBe('image/png');
+    expect(typeof uploadJson.url).toBe('string');
+
+    // 4. Reject negative product price via Zod schema
+    const badProduct = await app.inject({
+      method: 'POST',
+      url: '/api/v1/products',
+      headers: { Authorization: `Bearer ${brandToken}` },
+      payload: { name: 'Bad Item', category: 'Tops', price: -50, sku: 'BAD-1' },
+    });
+    expect(badProduct.statusCode).toBe(400);
+    expect(JSON.parse(badProduct.body).error).toBe('ValidationError');
 
     await app.close();
   });

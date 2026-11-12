@@ -6,7 +6,23 @@ import {
   requireRole,
 } from '../../infrastructure/auth.guard.js';
 import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
-import { StorefrontSettings, Tenant } from '../../domain/types.js';
+import {
+  STOREFRONT_HEADER_STYLES,
+  StorefrontHeaderStyle,
+  StorefrontSettings,
+  Tenant,
+} from '../../domain/types.js';
+import {
+  BrandAnalyticsResponseSchema,
+  BrandProfileGetResponseSchema,
+  BrandProfileMutationResponseSchema,
+  BrandProfileUpdateInputSchema,
+  BrandSlugParamsSchema,
+  PublicStorefrontResponseSchema,
+  StorefrontSettingsInputSchema,
+  formatZodValidationError,
+  validateZodOutput,
+} from './storefront.schemas.js';
 
 const brandReadGuards = createBrandMiddleware(requirePermission('brand:products', 'read'));
 const brandAnalyticsGuards = createBrandMiddleware(requirePermission('brand:analytics', 'read'));
@@ -24,13 +40,36 @@ function isSafeHttpUrl(url: unknown): url is string {
 }
 
 const SAFE_DATA_IMAGE_RE = /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/i;
-const ALLOWED_HEADER_STYLES = new Set(['split', 'minimal', 'centered', 'cover'] as const);
+const ALLOWED_HEADER_STYLES = new Set<string>(STOREFRONT_HEADER_STYLES);
 
 function isSafeImageAssetUrl(url: unknown): url is string {
   if (typeof url !== 'string') return false;
   const trimmed = url.trim();
   if (!trimmed) return false;
-  return (trimmed.length <= 2_500_000 && SAFE_DATA_IMAGE_RE.test(trimmed)) || isSafeHttpUrl(trimmed);
+  return (
+    (trimmed.length <= 2_500_000 && SAFE_DATA_IMAGE_RE.test(trimmed)) ||
+    trimmed.startsWith('/') ||
+    isSafeHttpUrl(trimmed)
+  );
+}
+
+function normalizeTenantForOutput(tenant: Tenant): Tenant {
+  if (!tenant.storefrontSettings) return tenant;
+  const rawSettings = tenant.storefrontSettings;
+  const cleanHeaderStyle: StorefrontHeaderStyle | undefined =
+    rawSettings.headerStyle && ALLOWED_HEADER_STYLES.has(rawSettings.headerStyle)
+      ? rawSettings.headerStyle
+      : rawSettings.headerStyle
+      ? 'split'
+      : undefined;
+  return {
+    ...tenant,
+    storefrontSettings: {
+      ...rawSettings,
+      ...(cleanHeaderStyle ? { headerStyle: cleanHeaderStyle } : {}),
+      ...(rawSettings.currency ? { currency: 'BDT' } : {}),
+    },
+  };
 }
 
 type StorefrontTextField = Exclude<
@@ -121,19 +160,32 @@ export async function brandStorefrontRoutes(app: FastifyInstance) {
   // Brand Profile & Storefront Customization
   app.get('/api/v1/brand/profile', { preHandler: brandReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
-    return { tenant: request.tenant };
+    const payload = validateZodOutput(
+      BrandProfileGetResponseSchema,
+      { tenant: normalizeTenantForOutput(request.tenant) },
+      'GET /api/v1/brand/profile'
+    );
+    return payload;
   });
 
   app.put('/api/v1/brand/profile', { preHandler: brandOwnerGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
-    const body = (request.body as Partial<Tenant>) || {};
+    const parsedBody = BrandProfileUpdateInputSchema.safeParse(request.body ?? {});
+    if (!parsedBody.success) {
+      return reply.status(400).send(formatZodValidationError(parsedBody.error));
+    }
+    const body = parsedBody.data;
     const updates: Partial<Tenant> = {
-      name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : request.tenant.name,
+      name: body.name && body.name.trim() ? body.name.trim() : request.tenant.name,
       description: typeof body.description === 'string' ? body.description : request.tenant.description,
-      contactEmail: typeof body.contactEmail === 'string' && body.contactEmail.includes('@')
-        ? body.contactEmail.trim()
-        : request.tenant.contactEmail,
-      storefrontSettings: sanitizeStorefrontSettings(body.storefrontSettings, request.tenant.storefrontSettings),
+      contactEmail:
+        typeof body.contactEmail === 'string' && body.contactEmail.includes('@')
+          ? body.contactEmail.trim()
+          : request.tenant.contactEmail,
+      storefrontSettings: sanitizeStorefrontSettings(
+        body.storefrontSettings,
+        request.tenant.storefrontSettings
+      ),
     };
     if (typeof body.logoUrl === 'string' && !body.logoUrl.trim()) {
       updates.logoUrl = '';
@@ -147,17 +199,43 @@ export async function brandStorefrontRoutes(app: FastifyInstance) {
     }
 
     const updated = db.updateTenant(request.tenant.id, updates);
-    return { message: 'Brand profile updated successfully', tenant: updated };
+    if (!updated) {
+      return reply.status(404).send({ error: 'NotFound', message: 'Brand tenant not found.' });
+    }
+    return validateZodOutput(
+      BrandProfileMutationResponseSchema,
+      {
+        message: 'Brand profile updated successfully',
+        tenant: normalizeTenantForOutput(updated),
+      },
+      'PUT /api/v1/brand/profile'
+    );
   });
 
   // Dedicated storefront settings update
   app.put('/api/v1/brand/storefront-settings', { preHandler: brandOwnerGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
-    const settings = (request.body as any) || {};
+    const parsedSettings = StorefrontSettingsInputSchema.safeParse(request.body ?? {});
+    if (!parsedSettings.success) {
+      return reply.status(400).send(formatZodValidationError(parsedSettings.error));
+    }
     const updated = db.updateTenant(request.tenant.id, {
-      storefrontSettings: sanitizeStorefrontSettings(settings, request.tenant.storefrontSettings),
+      storefrontSettings: sanitizeStorefrontSettings(
+        parsedSettings.data,
+        request.tenant.storefrontSettings
+      ),
     });
-    return { message: 'Storefront settings updated successfully', tenant: updated };
+    if (!updated) {
+      return reply.status(404).send({ error: 'NotFound', message: 'Brand tenant not found.' });
+    }
+    return validateZodOutput(
+      BrandProfileMutationResponseSchema,
+      {
+        message: 'Storefront settings updated successfully',
+        tenant: normalizeTenantForOutput(updated),
+      },
+      'PUT /api/v1/brand/storefront-settings'
+    );
   });
 
   // Brand Analytics
@@ -182,43 +260,56 @@ export async function brandStorefrontRoutes(app: FastifyInstance) {
       }))
     );
 
-    return {
-      tenantId,
-      totalProducts: products.length,
-      storefrontPublishedCount: products.filter(p => p.brandStorefrontPublished).length,
-      marketplacePublishedCount: products.filter(p => p.marketplacePublished).length,
-      totalOrders: orders.length,
-      totalRevenue,
-      lowStockWarnings: lowStockVariants,
-      tryOnUsage: {
-        used: subscription?.tryOnUsed || 0,
-        quota: subscription?.tryOnMonthlyQuota || 1000,
-        plan: subscription?.plan || 'PRO'
-      }
-    };
+    return validateZodOutput(
+      BrandAnalyticsResponseSchema,
+      {
+        tenantId,
+        totalProducts: products.length,
+        storefrontPublishedCount: products.filter(p => p.brandStorefrontPublished).length,
+        marketplacePublishedCount: products.filter(p => p.marketplacePublished).length,
+        totalOrders: orders.length,
+        totalRevenue,
+        lowStockWarnings: lowStockVariants,
+        tryOnUsage: {
+          used: subscription?.tryOnUsed || 0,
+          quota: subscription?.tryOnMonthlyQuota || 1000,
+          plan: subscription?.plan || 'PRO'
+        }
+      },
+      'GET /api/v1/brand/analytics'
+    );
   });
 
   // Public Storefront Discovery (returns only public storefront fields, never private contactEmail)
   app.get('/api/v1/internal/storefront/:brandSlug', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { brandSlug } = request.params as { brandSlug: string };
+    const parsedParams = BrandSlugParamsSchema.safeParse(request.params);
+    if (!parsedParams.success) {
+      return reply.status(400).send(formatZodValidationError(parsedParams.error));
+    }
+    const { brandSlug } = parsedParams.data;
     const tenant = db.getTenantBySlug(brandSlug);
     if (!tenant || tenant.status !== 'ACTIVE') {
       return reply.status(404).send({ error: 'NotFound', message: 'Storefront not found or inactive.' });
     }
+    const normalizedTenant = normalizeTenantForOutput(tenant);
     const products = db.getStorefrontProducts(tenant.id);
-    return {
-      tenant: {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug,
-        status: tenant.status,
-        logoUrl: tenant.logoUrl,
-        bannerUrl: tenant.bannerUrl,
-        description: tenant.description,
-        storefrontSettings: tenant.storefrontSettings,
+    return validateZodOutput(
+      PublicStorefrontResponseSchema,
+      {
+        tenant: {
+          id: normalizedTenant.id,
+          name: normalizedTenant.name,
+          slug: normalizedTenant.slug,
+          status: normalizedTenant.status,
+          logoUrl: normalizedTenant.logoUrl,
+          bannerUrl: normalizedTenant.bannerUrl,
+          description: normalizedTenant.description,
+          storefrontSettings: normalizedTenant.storefrontSettings,
+        },
+        products,
       },
-      products,
-    };
+      'GET /api/v1/internal/storefront/:brandSlug'
+    );
   });
 
   // Internal Tenants Directory (protected by SUPER_ADMIN bearer token)
