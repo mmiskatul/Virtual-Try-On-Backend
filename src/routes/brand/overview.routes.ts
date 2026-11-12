@@ -217,19 +217,113 @@ function computeChecklistState(
   };
 }
 
-function formatActivityDetails(action: string, details?: Record<string, unknown>): string {
-  if (!details || Object.keys(details).length === 0) {
-    return action.replace(/_/g, ' ').toLowerCase();
+const TECHNICAL_ACTIVITY_KEYS = new Set([
+  'ipMasked',
+  'ipAddress',
+  'ip',
+  'correlationId',
+  'sessionId',
+  'actorId',
+  'userId',
+  'tenantId',
+  'tokenId',
+  'refreshTokenId',
+  'jti',
+  'requestId',
+  'userAgent',
+]);
+
+const SILENT_ACTIVITY_ACTIONS = new Set([
+  'AUTH_REFRESH',
+  'TOKEN_REFRESH',
+  'TOKEN_REFRESHED',
+  'SESSION_REFRESHED',
+]);
+
+function toTitleCaseFromConst(value: string): string {
+  return value
+    .toLowerCase()
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
+function toHumanFieldLabel(key: string): string {
+  return key
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .replace(/^./, (ch) => ch.toUpperCase());
+}
+
+function formatActivityTitle(action: string, rawEntity: string): string {
+  const normalized = action.toUpperCase();
+  if (normalized === 'BRAND_LOGIN' || normalized === 'LOGIN_SUCCESS') return 'Workspace Sign-In';
+  if (normalized === 'BRAND_REGISTERED') return 'Brand Workspace Created';
+  if (normalized === 'EMAIL_VERIFIED') return 'Email Verified';
+  if (normalized === 'BRAND_LOGOUT' || normalized === 'USER_LOGOUT') return 'Workspace Sign-Out';
+  if (normalized === 'OVERVIEW_CHECKLIST_UPDATED') return 'Getting Started Checklist';
+  if (normalized.includes('STOREFRONT')) return 'Storefront Design';
+  if (normalized.includes('MODERATION')) return 'Marketplace Moderation';
+  if (normalized.includes('PRODUCT')) return 'Catalog Product';
+  if (normalized.includes('CATEGORY')) return 'Product Category';
+  if (normalized.includes('COLLECTION')) return 'Product Collection';
+  if (normalized.includes('ORDER')) return 'Customer Order';
+
+  if (rawEntity && rawEntity !== 'User' && rawEntity !== 'Tenant') {
+    return rawEntity;
   }
-  if (typeof details.summary === 'string' && details.summary.trim()) {
-    return details.summary.trim();
+  return toTitleCaseFromConst(action);
+}
+
+function formatActivityDetails(
+  action: string,
+  details?: Record<string, unknown>,
+  actorName = 'Team member'
+): string {
+  const normalized = action.toUpperCase();
+  if (normalized === 'BRAND_LOGIN' || normalized === 'LOGIN_SUCCESS') {
+    const provider = typeof details?.provider === 'string' ? details.provider : '';
+    return provider === 'google_oauth'
+      ? `${actorName} signed in with Google`
+      : `${actorName} signed in to the brand dashboard`;
   }
-  if (typeof details.message === 'string' && details.message.trim()) {
+  if (normalized === 'BRAND_REGISTERED') {
+    const brandName = typeof details?.brandName === 'string' ? details.brandName.trim() : '';
+    return brandName
+      ? `${actorName} created workspace "${brandName}"`
+      : `${actorName} registered the brand workspace`;
+  }
+  if (normalized === 'EMAIL_VERIFIED') {
+    return `${actorName} verified their workspace email address`;
+  }
+  if (normalized === 'BRAND_LOGOUT' || normalized === 'USER_LOGOUT') {
+    return `${actorName} signed out of the brand dashboard`;
+  }
+
+  if (details && typeof details.summary === 'string' && details.summary.trim()) {
+    const summaryText = details.summary.trim();
+    const matchedChecklist = CHECKLIST_CATALOG.find((item) => summaryText.includes(item.id));
+    if (matchedChecklist) {
+      return `Updated milestone: "${matchedChecklist.label}"`;
+    }
+    return summaryText;
+  }
+  if (details && typeof details.message === 'string' && details.message.trim()) {
     return details.message.trim();
   }
-  return Object.entries(details)
+
+  const safeEntries = Object.entries(details || {}).filter(
+    ([key, val]) => !TECHNICAL_ACTIVITY_KEYS.has(key) && val !== undefined && val !== null && val !== ''
+  );
+
+  if (safeEntries.length === 0) {
+    return `${actorName} completed ${toTitleCaseFromConst(action).toLowerCase()}`;
+  }
+
+  return safeEntries
     .slice(0, 4)
-    .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+    .map(([k, v]) => `${toHumanFieldLabel(k)}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
     .join(' • ');
 }
 
@@ -509,26 +603,35 @@ export async function brandOverviewRoutes(app: FastifyInstance) {
 
       const { limit } = parsedQuery.data;
       const tenantId = tenant.id;
-      const auditEvents = db.getAuditLogs(tenantId).map((log) => ({
-        id: log.id,
-        action: log.action,
-        entity: log.entity,
-        details: formatActivityDetails(log.action, log.details),
-        actor: log.actorId,
-        role: log.actorRole,
-        timestamp: new Date(log.timestamp).toLocaleString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        createdAt: log.timestamp,
-      }));
+      const auditEvents = db
+        .getAuditLogs(tenantId)
+        .filter((log) => !SILENT_ACTIVITY_ACTIONS.has(log.action.toUpperCase()))
+        .map((log) => {
+          const actorUser = log.actorId ? db.getUserById(log.actorId) : undefined;
+          const actorName =
+            actorUser?.name ||
+            (String(log.actorRole) === 'SYSTEM' ? 'System' : 'Team member');
+          return {
+            id: log.id,
+            action: log.action,
+            entity: formatActivityTitle(log.action, log.entity),
+            details: formatActivityDetails(log.action, log.details, actorName),
+            actor: actorName,
+            role: log.actorRole,
+            timestamp: new Date(log.timestamp).toLocaleString('en-US', {
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+            createdAt: log.timestamp,
+          };
+        });
 
       const inventoryEvents = db.getInventoryLogs(tenantId).map((inv) => ({
         id: inv.id,
         action: 'INVENTORY_ADJUSTED',
-        entity: inv.variantSku || inv.productId,
+        entity: `Inventory • ${inv.variantSku || inv.productId}`,
         details: `${inv.change >= 0 ? '+' : ''}${inv.change} units • ${inv.reason} (Stock: ${inv.newStock})`,
         actor: 'Inventory',
         role: 'SYSTEM',

@@ -170,6 +170,10 @@ describe('Phase 8: Brand Overview Endpoints, Validation & Tenant Isolation', () 
     expect(Array.isArray(body.activities)).toBe(true);
     expect(body.activities.length).toBeGreaterThan(0);
     expect(body.activities.length).toBeLessThanOrEqual(10);
+    for (const act of body.activities) {
+      expect(act.entity).not.toBe('User');
+      expect(act.details).not.toMatch(/ipMasked|sessionId|correlationId/i);
+    }
 
     const badLimit = await app.inject({
       method: 'GET',
