@@ -30,11 +30,11 @@ const CHECKLIST_CATALOG: ReadonlyArray<{
   label: string;
   href: string;
 }> = [
-  { id: 'chk_profile', label: 'Complete brand profile & story', href: '/dashboard/getting-started' },
-  { id: 'chk_logo', label: 'Upload main logo & brand assets', href: '/dashboard/brand' },
-  { id: 'chk_cover', label: 'Configure storefront cover & theme', href: '/dashboard/getting-started' },
+  { id: 'chk_profile', label: 'Complete brand profile & story', href: '/dashboard/brand/profile' },
+  { id: 'chk_logo', label: 'Upload main logo & brand assets', href: '/dashboard/brand/media' },
+  { id: 'chk_cover', label: 'Configure storefront cover & theme', href: '/dashboard/brand/media' },
   { id: 'chk_biz', label: 'Add legal & business contact details', href: '/dashboard/settings/business' },
-  { id: 'chk_product', label: 'Create first apparel product', href: '/dashboard/products/create' },
+  { id: 'chk_product', label: 'Create first apparel product', href: '/dashboard/products/addproduct' },
   { id: 'chk_variants', label: 'Configure sizes, colors & variants', href: '/dashboard/products' },
   { id: 'chk_storefront', label: 'Publish dedicated brand storefront', href: '/dashboard/brand' },
   { id: 'chk_tryon', label: 'Configure Virtual Try-On experience', href: '/dashboard/virtual-try-on/configuration' },

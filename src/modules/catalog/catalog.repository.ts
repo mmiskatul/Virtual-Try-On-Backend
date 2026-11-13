@@ -135,6 +135,102 @@ export class CatalogRepository {
     return dto;
   }
 
+  public async updateCategory(
+    tenantId: string,
+    id: string,
+    updates: { name?: string; slug?: string; sortOrder?: number; seoTitle?: string }
+  ): Promise<CategoryDto | null> {
+    const prisma = getGlobalPrisma();
+    let existing: CategoryDto | undefined;
+    for (const c of memoryCategories.values()) {
+      if (c.id === id && c.tenantId === tenantId && c.active) {
+        existing = c;
+        break;
+      }
+    }
+
+    if (!existing && prisma) {
+      try {
+        const row = await prisma.category.findFirst({ where: { id, tenantId, active: true } });
+        if (row) {
+          existing = {
+            id: row.id,
+            tenantId: row.tenantId,
+            name: row.name,
+            slug: row.slug,
+            sortOrder: row.sortOrder,
+            active: row.active,
+            seoTitle: row.seoTitle ?? undefined,
+          };
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'catalog.find_category_prisma_warning');
+      }
+    }
+
+    if (!existing) return null;
+
+    const nextName = updates.name?.trim() ?? existing.name;
+    const nextSlug = updates.slug ? slugify(updates.slug) : existing.slug;
+    const nextDto: CategoryDto = {
+      ...existing,
+      name: nextName,
+      slug: nextSlug,
+      sortOrder: updates.sortOrder ?? existing.sortOrder,
+      seoTitle: updates.seoTitle !== undefined ? updates.seoTitle.trim() : existing.seoTitle,
+    };
+
+    if (prisma) {
+      try {
+        await prisma.category.update({
+          where: { id },
+          data: {
+            name: nextDto.name,
+            slug: nextDto.slug,
+            sortOrder: nextDto.sortOrder,
+            seoTitle: nextDto.seoTitle ?? null,
+          },
+        });
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'catalog.update_category_prisma_warning');
+      }
+    }
+
+    memoryCategories.delete(`${tenantId}::${existing.slug}`);
+    memoryCategories.set(`${tenantId}::${nextDto.slug}`, nextDto);
+    return nextDto;
+  }
+
+  public async deleteCategory(tenantId: string, id: string): Promise<boolean> {
+    const prisma = getGlobalPrisma();
+    let targetKey: string | null = null;
+    for (const [k, c] of memoryCategories.entries()) {
+      if (c.id === id && c.tenantId === tenantId) {
+        targetKey = k;
+        break;
+      }
+    }
+
+    let foundInPrisma = false;
+    if (prisma) {
+      try {
+        const row = await prisma.category.findFirst({ where: { id, tenantId, active: true } });
+        if (row) {
+          foundInPrisma = true;
+          await prisma.category.update({ where: { id }, data: { active: false } });
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'catalog.delete_category_prisma_warning');
+      }
+    }
+
+    if (targetKey) {
+      memoryCategories.delete(targetKey);
+      return true;
+    }
+    return foundInPrisma;
+  }
+
   public async listCollections(tenantId?: string): Promise<CollectionDto[]> {
     const prisma = getGlobalPrisma();
     if (prisma) {
@@ -221,6 +317,98 @@ export class CatalogRepository {
     if (prev && !prisma) dto.id = prev.id;
     memoryCollections.set(memKey, dto);
     return dto;
+  }
+
+  public async updateCollection(
+    tenantId: string,
+    id: string,
+    updates: { title?: string; slug?: string; description?: string }
+  ): Promise<CollectionDto | null> {
+    const prisma = getGlobalPrisma();
+    let existing: CollectionDto | undefined;
+    for (const c of memoryCollections.values()) {
+      if (c.id === id && c.tenantId === tenantId && c.active) {
+        existing = c;
+        break;
+      }
+    }
+
+    if (!existing && prisma) {
+      try {
+        const row = await prisma.collection.findFirst({ where: { id, tenantId, active: true } });
+        if (row) {
+          existing = {
+            id: row.id,
+            tenantId: row.tenantId,
+            title: row.title,
+            slug: row.slug,
+            description: row.description ?? undefined,
+            active: row.active,
+            sponsored: row.sponsored,
+          };
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'catalog.find_collection_prisma_warning');
+      }
+    }
+
+    if (!existing) return null;
+
+    const nextDto: CollectionDto = {
+      ...existing,
+      title: updates.title?.trim() ?? existing.title,
+      slug: updates.slug ? slugify(updates.slug) : existing.slug,
+      description: updates.description !== undefined ? updates.description.trim() : existing.description,
+    };
+
+    if (prisma) {
+      try {
+        await prisma.collection.update({
+          where: { id },
+          data: {
+            title: nextDto.title,
+            slug: nextDto.slug,
+            description: nextDto.description ?? null,
+          },
+        });
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'catalog.update_collection_prisma_warning');
+      }
+    }
+
+    memoryCollections.delete(`${tenantId}::${existing.slug}`);
+    memoryCollections.set(`${tenantId}::${nextDto.slug}`, nextDto);
+    return nextDto;
+  }
+
+  public async deleteCollection(tenantId: string, id: string): Promise<boolean> {
+    const prisma = getGlobalPrisma();
+    let targetKey: string | null = null;
+    for (const [k, c] of memoryCollections.entries()) {
+      if (c.id === id && c.tenantId === tenantId) {
+        targetKey = k;
+        break;
+      }
+    }
+
+    let foundInPrisma = false;
+    if (prisma) {
+      try {
+        const row = await prisma.collection.findFirst({ where: { id, tenantId, active: true } });
+        if (row) {
+          foundInPrisma = true;
+          await prisma.collection.update({ where: { id }, data: { active: false } });
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'catalog.delete_collection_prisma_warning');
+      }
+    }
+
+    if (targetKey) {
+      memoryCollections.delete(targetKey);
+      return true;
+    }
+    return foundInPrisma;
   }
 
   public async syncProductRelations(product: Product): Promise<void> {
@@ -330,6 +518,7 @@ export class CatalogRepository {
     tenantId: string;
     brandStorefrontPublished?: boolean;
     marketplacePublished?: boolean;
+    isTryOnEligible?: boolean;
   }): Promise<{ ok: true; product: Product; publication: PublicationMeta } | { ok: false; code: string; message: string }> {
     const product = db.getProductById(input.productId, input.tenantId);
     if (!product) {
@@ -353,6 +542,9 @@ export class CatalogRepository {
     }
     if (typeof input.marketplacePublished === 'boolean') {
       updates.marketplacePublished = input.marketplacePublished;
+    }
+    if (typeof input.isTryOnEligible === 'boolean') {
+      updates.isTryOnEligible = input.isTryOnEligible;
     }
 
     const updated = db.updateProduct(input.productId, input.tenantId, updates);

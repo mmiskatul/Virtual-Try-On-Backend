@@ -176,6 +176,7 @@ export const CreateProductInputSchema = z.object({
   collection: z.string().trim().max(80).optional(),
   currency: NormalizedCurrencyInputSchema.optional(),
   compareAtPrice: z.coerce.number().finite().min(0).max(10_000_000).optional(),
+  stock: z.coerce.number().int().min(0).max(1_000_000).optional(),
   images: z.array(SafeImageAssetSchema).max(12).optional(),
   fabricIds: z.array(z.string().trim().min(1).max(120)).max(24).optional(),
   tags: z.array(z.string().trim().min(1).max(40)).max(30).optional(),

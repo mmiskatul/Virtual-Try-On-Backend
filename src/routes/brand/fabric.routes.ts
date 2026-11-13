@@ -1,11 +1,18 @@
-import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { db } from '../../infrastructure/database.js';
+import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { Fabric } from '../../domain/types.js';
 import {
   createBrandMiddleware,
   registerScopedPreHandlers,
 } from '../../infrastructure/auth.guard.js';
+import { db } from '../../infrastructure/database.js';
+import { NotFoundException, parseWithSchema } from '../../infrastructure/errors.js';
 import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
-import { Fabric } from '../../domain/types.js';
+import {
+  CreateFabricInputSchema,
+  FabricIdParamsSchema,
+  UpdateFabricInputSchema,
+} from './product.schemas.js';
+import { requireTenantContext } from './profile.service.js';
 
 const brandFabricReadGuards = createBrandMiddleware(requirePermission('brand:products', 'read'));
 const brandFabricWriteGuards = createBrandMiddleware(requirePermission('brand:products', 'write'));
@@ -14,38 +21,31 @@ export async function brandFabricRoutes(app: FastifyInstance) {
   registerScopedPreHandlers(app, brandFabricReadGuards);
 
   // List Fabrics
-  app.get('/api/v1/fabrics', { preHandler: brandFabricReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
-    const fabrics = db.getFabricsByTenant(request.tenant.id);
+  app.get('/api/v1/fabrics', { preHandler: brandFabricReadGuards }, async (request: FastifyRequest) => {
+    const tenant = requireTenantContext(request.tenant);
+    const fabrics = db.getFabricsByTenant(tenant.id);
     return { fabrics };
   });
 
   // Create Fabric
   app.post('/api/v1/fabrics', { preHandler: brandFabricWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
-    const body = request.body as any;
-    const { name, composition, color, pattern } = body || {};
-    if (!name || !composition) {
-      return reply.status(400).send({
-        error: 'ValidationError',
-        message: 'Fabric name and composition are required.'
-      });
-    }
+    const tenant = requireTenantContext(request.tenant);
+    const body = parseWithSchema(CreateFabricInputSchema, request.body ?? {});
 
     const fabric: Fabric = {
       id: `fab_${Math.random().toString(36).substring(2, 9)}`,
-      tenantId: request.tenant.id,
-      name,
-      composition,
-      color: color || 'Default',
-      pattern: pattern || 'Solid',
+      tenantId: tenant.id,
+      name: body.name,
+      composition: body.composition,
+      color: body.color || 'Default',
+      pattern: body.pattern || 'Solid',
       textureUrl: body.textureUrl,
-      weightGsm: body.weightGsm ? Number(body.weightGsm) : undefined,
+      weightGsm: body.weightGsm !== undefined ? Number(body.weightGsm) : undefined,
       stretch: body.stretch || 'NONE',
       transparency: body.transparency || 'OPAQUE',
       thickness: body.thickness || 'MEDIUM',
-      careInstructions: body.careInstructions || 'Dry clean recommended.',
-      createdAt: Date.now()
+      careInstructions: body.careInstructions || body.care || 'Dry clean recommended.',
+      createdAt: Date.now(),
     };
 
     const created = db.createFabric(fabric);
@@ -53,10 +53,11 @@ export async function brandFabricRoutes(app: FastifyInstance) {
   });
 
   // Update Fabric (whitelist allowed fields)
-  app.put('/api/v1/fabrics/:id', { preHandler: brandFabricWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
-    const { id } = request.params as { id: string };
-    const body = (request.body as Partial<Fabric>) || {};
+  app.put('/api/v1/fabrics/:id', { preHandler: brandFabricWriteGuards }, async (request: FastifyRequest) => {
+    const tenant = requireTenantContext(request.tenant);
+    const { id } = parseWithSchema(FabricIdParamsSchema, request.params ?? {});
+    const body = parseWithSchema(UpdateFabricInputSchema, request.body ?? {});
+
     const safeUpdates: Partial<Fabric> = {};
     if (body.name !== undefined) safeUpdates.name = body.name;
     if (body.composition !== undefined) safeUpdates.composition = body.composition;
@@ -67,22 +68,24 @@ export async function brandFabricRoutes(app: FastifyInstance) {
     if (body.stretch !== undefined) safeUpdates.stretch = body.stretch;
     if (body.transparency !== undefined) safeUpdates.transparency = body.transparency;
     if (body.thickness !== undefined) safeUpdates.thickness = body.thickness;
-    if (body.careInstructions !== undefined) safeUpdates.careInstructions = body.careInstructions;
+    if (body.careInstructions !== undefined || body.care !== undefined) {
+      safeUpdates.careInstructions = body.careInstructions ?? body.care;
+    }
 
-    const updated = db.updateFabric(id, request.tenant.id, safeUpdates);
+    const updated = db.updateFabric(id, tenant.id, safeUpdates);
     if (!updated) {
-      return reply.status(404).send({ error: 'NotFound', message: 'Fabric not found in your tenant catalog.' });
+      throw new NotFoundException('Fabric not found in your tenant catalog.');
     }
     return { message: 'Fabric updated successfully', fabric: updated };
   });
 
   // Delete Fabric
-  app.delete('/api/v1/fabrics/:id', { preHandler: brandFabricWriteGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
-    if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
-    const { id } = request.params as { id: string };
-    const deleted = db.deleteFabric(id, request.tenant.id);
+  app.delete('/api/v1/fabrics/:id', { preHandler: brandFabricWriteGuards }, async (request: FastifyRequest) => {
+    const tenant = requireTenantContext(request.tenant);
+    const { id } = parseWithSchema(FabricIdParamsSchema, request.params ?? {});
+    const deleted = db.deleteFabric(id, tenant.id);
     if (!deleted) {
-      return reply.status(404).send({ error: 'NotFound', message: 'Fabric not found in your tenant catalog.' });
+      throw new NotFoundException('Fabric not found in your tenant catalog.');
     }
     return { message: 'Fabric deleted successfully' };
   });
