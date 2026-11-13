@@ -31,6 +31,7 @@ export const ProductListQuerySchema = z.object({
   search: z.string().trim().max(120).optional(),
   category: z.string().trim().max(80).optional(),
   status: z.enum(['ALL', 'MARKETPLACE', 'STOREFRONT_ONLY', 'DRAFT', 'TRYON']).optional(),
+  sortBy: z.enum(['latest', 'price-asc', 'price-desc', 'sales', 'name']).optional(),
 });
 
 export const UpdateProductInputSchema = z
@@ -133,6 +134,10 @@ export const CategoryCreateSchema = z.object({
   slug: z.string().trim().min(2).max(120).optional(),
   sortOrder: z.coerce.number().int().min(0).max(9999).default(0),
   seoTitle: z.string().trim().max(255).optional(),
+  description: z.string().trim().max(1000).optional(),
+  parentCategory: z.string().trim().max(120).optional(),
+  tryOnCategory: z.enum(['tops', 'bottoms', 'dresses', 'outerwear', 'all', 'none']).optional().default('none'),
+  active: z.boolean().optional().default(true),
 });
 
 export const CategoryUpdateSchema = z
@@ -141,8 +146,32 @@ export const CategoryUpdateSchema = z
     slug: z.string().trim().min(2).max(120).optional(),
     sortOrder: z.coerce.number().int().min(0).max(9999).optional(),
     seoTitle: z.string().trim().max(255).optional(),
+    description: z.string().trim().max(1000).optional(),
+    parentCategory: z.string().trim().max(120).optional(),
+    tryOnCategory: z.enum(['tops', 'bottoms', 'dresses', 'outerwear', 'all', 'none']).optional(),
+    active: z.boolean().optional(),
   })
   .refine((d) => Object.keys(d).length > 0, 'Provide at least one category field to update.');
+
+export const CheckCategorySlugQuerySchema = z.object({
+  slug: z.string().trim().max(120).optional(),
+  name: z.string().trim().max(120).optional(),
+});
+
+export const CheckCategorySlugResponseSchema = z.object({
+  available: z.boolean(),
+  slug: z.string(),
+  suggestedSlug: z.string().optional(),
+  message: z.string(),
+});
+
+export const CategoryFormOptionsResponseSchema = z.object({
+  presets: z.array(z.string()),
+  tryOnClasses: z.array(z.string()),
+  existingCategories: z.array(z.string()),
+  existingCount: z.number(),
+  defaultSortOrder: z.number(),
+});
 
 export const CollectionCreateSchema = z.object({
   title: z.string().trim().min(2, 'Collection title must be at least 2 characters.').max(120),

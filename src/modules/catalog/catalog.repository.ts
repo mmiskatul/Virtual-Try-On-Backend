@@ -15,6 +15,10 @@ export interface CategoryDto {
   sortOrder: number;
   active: boolean;
   seoTitle?: string;
+  description?: string;
+  parentCategory?: string;
+  tryOnCategory?: string;
+  productCount?: number;
 }
 
 export interface CollectionDto {
@@ -52,6 +56,15 @@ function slugify(value: string): string {
 
 export class CatalogRepository {
   public async listCategories(tenantId?: string): Promise<CategoryDto[]> {
+    const products = tenantId ? db.getProductsByTenant(tenantId) : [];
+    const countMap = new Map<string, number>();
+    for (const p of products) {
+      if (p.category) {
+        const key = p.category.trim().toLowerCase();
+        countMap.set(key, (countMap.get(key) || 0) + 1);
+      }
+    }
+
     const prisma = getGlobalPrisma();
     if (prisma) {
       try {
@@ -60,15 +73,23 @@ export class CatalogRepository {
           orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
         });
         if (rows.length > 0) {
-          return rows.map((r: any) => ({
-            id: r.id,
-            tenantId: r.tenantId,
-            name: r.name,
-            slug: r.slug,
-            sortOrder: r.sortOrder,
-            active: r.active,
-            seoTitle: r.seoTitle ?? undefined,
-          }));
+          return rows.map((r: any) => {
+            const mem = memoryCategories.get(`${r.tenantId ?? 'platform'}::${r.slug}`);
+            const count = countMap.get(r.name.trim().toLowerCase()) ?? countMap.get(r.slug.trim().toLowerCase()) ?? 0;
+            return {
+              id: r.id,
+              tenantId: r.tenantId,
+              name: r.name,
+              slug: r.slug,
+              sortOrder: r.sortOrder,
+              active: r.active,
+              seoTitle: r.seoTitle ?? undefined,
+              description: mem?.description,
+              parentCategory: mem?.parentCategory,
+              tryOnCategory: mem?.tryOnCategory,
+              productCount: count,
+            };
+          });
         }
       } catch (err: any) {
         logger.warn({ err: err?.message }, 'catalog.list_categories_prisma_warning');
@@ -77,8 +98,138 @@ export class CatalogRepository {
 
     const list = Array.from(memoryCategories.values()).filter(
       (c) => c.active && (!tenantId || c.tenantId === tenantId || c.tenantId === null)
-    );
+    ).map((c) => ({
+      ...c,
+      productCount: countMap.get(c.name.trim().toLowerCase()) ?? countMap.get(c.slug.trim().toLowerCase()) ?? 0,
+    }));
     return list.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  }
+
+  public async getCategoryById(tenantId: string | null, id: string): Promise<CategoryDto | null> {
+    for (const c of memoryCategories.values()) {
+      if (c.id === id && (tenantId === null || c.tenantId === tenantId) && c.active) {
+        return c;
+      }
+    }
+    const prisma = getGlobalPrisma();
+    if (prisma) {
+      try {
+        const r = await prisma.category.findFirst({
+          where: tenantId ? { id, tenantId, active: true } : { id, active: true },
+        });
+        if (r) {
+          const mem = memoryCategories.get(`${r.tenantId ?? 'platform'}::${r.slug}`);
+          return {
+            id: r.id,
+            tenantId: r.tenantId,
+            name: r.name,
+            slug: r.slug,
+            sortOrder: r.sortOrder,
+            active: r.active,
+            seoTitle: r.seoTitle ?? undefined,
+            description: mem?.description,
+            parentCategory: mem?.parentCategory,
+            tryOnCategory: mem?.tryOnCategory,
+          };
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'catalog.get_category_by_id_prisma_warning');
+      }
+    }
+    return null;
+  }
+
+  public async findCategoryBySlug(tenantId: string | null, slug: string): Promise<CategoryDto | null> {
+    const cleanSlug = slugify(slug);
+    const memKey = `${tenantId ?? 'platform'}::${cleanSlug}`;
+    const cached = memoryCategories.get(memKey);
+    if (cached && cached.active) return cached;
+
+    const prisma = getGlobalPrisma();
+    if (prisma) {
+      try {
+        const r = await prisma.category.findFirst({
+          where: { tenantId, slug: cleanSlug, active: true },
+        });
+        if (r) {
+          const mem = memoryCategories.get(`${r.tenantId ?? 'platform'}::${r.slug}`);
+          return {
+            id: r.id,
+            tenantId: r.tenantId,
+            name: r.name,
+            slug: r.slug,
+            sortOrder: r.sortOrder,
+            active: r.active,
+            seoTitle: r.seoTitle ?? undefined,
+            description: mem?.description,
+            parentCategory: mem?.parentCategory,
+            tryOnCategory: mem?.tryOnCategory,
+          };
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'catalog.find_category_by_slug_prisma_warning');
+      }
+    }
+    return null;
+  }
+
+  public async findCategoryByName(tenantId: string | null, name: string): Promise<CategoryDto | null> {
+    const trimmed = name.trim().toLowerCase();
+    for (const c of memoryCategories.values()) {
+      if ((c.tenantId === tenantId || (!tenantId && !c.tenantId)) && c.active && c.name.toLowerCase() === trimmed) {
+        return c;
+      }
+    }
+
+    const prisma = getGlobalPrisma();
+    if (prisma) {
+      try {
+        const r = await prisma.category.findFirst({
+          where: { tenantId, name: { equals: name.trim(), mode: 'insensitive' }, active: true },
+        });
+        if (r) {
+          const mem = memoryCategories.get(`${r.tenantId ?? 'platform'}::${r.slug}`);
+          return {
+            id: r.id,
+            tenantId: r.tenantId,
+            name: r.name,
+            slug: r.slug,
+            sortOrder: r.sortOrder,
+            active: r.active,
+            seoTitle: r.seoTitle ?? undefined,
+            description: mem?.description,
+            parentCategory: mem?.parentCategory,
+            tryOnCategory: mem?.tryOnCategory,
+          };
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'catalog.find_category_by_name_prisma_warning');
+      }
+    }
+    return null;
+  }
+
+  public async checkCategorySlugAvailable(
+    tenantId: string | null,
+    slugCandidate: string
+  ): Promise<{ available: boolean; slug: string; suggestedSlug?: string }> {
+    const baseSlug = slugify(slugCandidate);
+    const existing = await this.findCategoryBySlug(tenantId, baseSlug);
+    if (!existing) {
+      return { available: true, slug: baseSlug };
+    }
+    let suffix = 2;
+    let candidate = `${baseSlug}-${suffix}`;
+    while (await this.findCategoryBySlug(tenantId, candidate)) {
+      suffix += 1;
+      candidate = `${baseSlug}-${suffix}`;
+      if (suffix > 50) break;
+    }
+    return {
+      available: false,
+      slug: baseSlug,
+      suggestedSlug: candidate,
+    };
   }
 
   public async upsertCategory(input: {
@@ -87,6 +238,10 @@ export class CatalogRepository {
     slug?: string;
     sortOrder?: number;
     seoTitle?: string;
+    description?: string;
+    parentCategory?: string;
+    tryOnCategory?: string;
+    active?: boolean;
   }): Promise<CategoryDto> {
     const cleanSlug = slugify(input.slug || input.name);
     const tenantId = input.tenantId ?? null;
@@ -96,8 +251,11 @@ export class CatalogRepository {
       name: input.name.trim(),
       slug: cleanSlug,
       sortOrder: input.sortOrder ?? 0,
-      active: true,
-      seoTitle: input.seoTitle?.trim(),
+      active: input.active !== undefined ? input.active : true,
+      seoTitle: input.seoTitle?.trim() || (input.description ? input.description.slice(0, 250).trim() : undefined),
+      description: input.description?.trim(),
+      parentCategory: input.parentCategory?.trim(),
+      tryOnCategory: input.tryOnCategory,
     };
 
     const prisma = getGlobalPrisma();
@@ -109,7 +267,12 @@ export class CatalogRepository {
         const row = existing
           ? await prisma.category.update({
               where: { id: existing.id },
-              data: { name: dto.name, sortOrder: dto.sortOrder, seoTitle: dto.seoTitle ?? null, active: true },
+              data: {
+                name: dto.name,
+                sortOrder: dto.sortOrder,
+                seoTitle: dto.seoTitle ?? null,
+                active: dto.active,
+              },
             })
           : await prisma.category.create({
               data: {
@@ -119,7 +282,7 @@ export class CatalogRepository {
                 slug: cleanSlug,
                 sortOrder: dto.sortOrder,
                 seoTitle: dto.seoTitle ?? null,
-                active: true,
+                active: dto.active,
               },
             });
         dto.id = row.id;
@@ -138,7 +301,16 @@ export class CatalogRepository {
   public async updateCategory(
     tenantId: string,
     id: string,
-    updates: { name?: string; slug?: string; sortOrder?: number; seoTitle?: string }
+    updates: {
+      name?: string;
+      slug?: string;
+      sortOrder?: number;
+      seoTitle?: string;
+      description?: string;
+      parentCategory?: string;
+      tryOnCategory?: string;
+      active?: boolean;
+    }
   ): Promise<CategoryDto | null> {
     const prisma = getGlobalPrisma();
     let existing: CategoryDto | undefined;
@@ -153,6 +325,7 @@ export class CatalogRepository {
       try {
         const row = await prisma.category.findFirst({ where: { id, tenantId, active: true } });
         if (row) {
+          const mem = memoryCategories.get(`${row.tenantId ?? 'platform'}::${row.slug}`);
           existing = {
             id: row.id,
             tenantId: row.tenantId,
@@ -161,6 +334,9 @@ export class CatalogRepository {
             sortOrder: row.sortOrder,
             active: row.active,
             seoTitle: row.seoTitle ?? undefined,
+            description: mem?.description,
+            parentCategory: mem?.parentCategory,
+            tryOnCategory: mem?.tryOnCategory,
           };
         }
       } catch (err: any) {
@@ -178,6 +354,10 @@ export class CatalogRepository {
       slug: nextSlug,
       sortOrder: updates.sortOrder ?? existing.sortOrder,
       seoTitle: updates.seoTitle !== undefined ? updates.seoTitle.trim() : existing.seoTitle,
+      description: updates.description !== undefined ? updates.description.trim() : existing.description,
+      parentCategory: updates.parentCategory !== undefined ? updates.parentCategory.trim() : existing.parentCategory,
+      tryOnCategory: updates.tryOnCategory !== undefined ? updates.tryOnCategory : existing.tryOnCategory,
+      active: updates.active !== undefined ? updates.active : existing.active,
     };
 
     if (prisma) {
@@ -189,6 +369,7 @@ export class CatalogRepository {
             slug: nextDto.slug,
             sortOrder: nextDto.sortOrder,
             seoTitle: nextDto.seoTitle ?? null,
+            active: nextDto.active,
           },
         });
       } catch (err: any) {

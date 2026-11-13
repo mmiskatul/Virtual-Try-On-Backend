@@ -42,20 +42,23 @@ const brandWriteGuards = createBrandMiddleware(requirePermission('brand:products
 
 function filterTenantProducts(
   products: Product[],
-  query: { search?: string; category?: string; status?: string }
+  query: { search?: string; category?: string; status?: string; sortBy?: string }
 ): Product[] {
   const searchLower = query.search?.trim().toLowerCase() || '';
   const categoryFilter = query.category?.trim();
   const statusFilter = query.status || 'ALL';
+  const sortBy = query.sortBy || 'latest';
 
-  return products.filter((p) => {
+  const list = products.filter((p) => {
     const matchesSearch =
       !searchLower ||
       p.name.toLowerCase().includes(searchLower) ||
       p.sku.toLowerCase().includes(searchLower) ||
       p.category.toLowerCase().includes(searchLower);
     const matchesCategory =
-      !categoryFilter || categoryFilter.toLowerCase() === 'all' || p.category === categoryFilter;
+      !categoryFilter ||
+      categoryFilter.toLowerCase() === 'all' ||
+      p.category.toLowerCase() === categoryFilter.toLowerCase();
     const matchesStatus =
       statusFilter === 'ALL' ||
       (statusFilter === 'MARKETPLACE' && p.marketplacePublished) ||
@@ -64,6 +67,16 @@ function filterTenantProducts(
       (statusFilter === 'TRYON' && p.isTryOnEligible);
     return matchesSearch && matchesCategory && matchesStatus;
   });
+
+  list.sort((a, b) => {
+    if (sortBy === 'price-asc') return (a.price || 0) - (b.price || 0);
+    if (sortBy === 'price-desc') return (b.price || 0) - (a.price || 0);
+    if (sortBy === 'sales') return ((b as any).salesCount || 0) - ((a as any).salesCount || 0);
+    if (sortBy === 'name') return a.name.localeCompare(b.name);
+    return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0);
+  });
+
+  return list;
 }
 
 function escapeCsvCell(value: string | number | boolean): string {
@@ -288,8 +301,8 @@ async function createBrandProductHandler(
 export async function brandProductRoutes(app: FastifyInstance) {
   registerScopedPreHandlers(app, brandReadGuards);
 
-  // List Products
-  app.get('/api/v1/products', { preHandler: brandReadGuards }, async (request: FastifyRequest) => {
+  // List Products (/api/v1/products and alias /api/v1/brand/products)
+  const listProductsHandler = async (request: FastifyRequest) => {
     const tenant = requireTenantContext(request.tenant);
     const query = parseWithSchema(ProductListQuerySchema, request.query ?? {});
     const products = filterTenantProducts(db.getProductsByTenant(tenant.id), query);
@@ -298,7 +311,10 @@ export async function brandProductRoutes(app: FastifyInstance) {
       { products },
       'GET /api/v1/products'
     );
-  });
+  };
+
+  app.get('/api/v1/products', { preHandler: brandReadGuards }, listProductsHandler);
+  app.get('/api/v1/brand/products', { preHandler: brandReadGuards }, listProductsHandler);
 
   // Add Product Form Options (categories, collections, fabrics, SKU prefix, plan quota)
   app.get('/api/v1/products/form-options', { preHandler: brandReadGuards }, async (request: FastifyRequest) => {
