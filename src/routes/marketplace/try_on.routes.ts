@@ -1,3 +1,4 @@
+import { resolveTryOnSettings } from '../../modules/tryon/tryon_settings.js';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { aiServiceHeaders } from '../../infrastructure/service_auth.js';
 import { config } from '../../infrastructure/config.js';
@@ -69,6 +70,11 @@ function reserveForRequest(
   const tenant = db.getTenantById(product.tenantId);
   if (!tenant || tenant.status !== 'ACTIVE') {
     reply.status(403).send({ error: 'ShopUnavailable', message: 'This shop is not currently available.' });
+    return null;
+  }
+
+  if (!resolveTryOnSettings(tenant).enabled) {
+    reply.status(403).send({ error: 'TryOnDisabled', message: 'This shop has turned virtual try-on off.' });
     return null;
   }
 

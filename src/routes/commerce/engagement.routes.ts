@@ -106,6 +106,18 @@ export async function commerceEngagementRoutes(app: FastifyInstance) {
     return reply.status(201).send(okResponse({ review: res.review }, request.correlationId));
   });
 
+  // Brand inbox: every review for this brand's products
+  app.get(
+    '/api/v1/brand/reviews',
+    { preHandler: [authenticateToken, tenantScopeGuard] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      if (request.authUser!.role === 'CUSTOMER') {
+        return reply.status(403).send({ error: 'Forbidden', message: 'Brand accounts only.' });
+      }
+      return okResponse({ reviews: commerceEngagementService.listBrandReviews(request.tenant!.id) }, request.correlationId);
+    }
+  );
+
   app.post(
     '/api/v1/reviews/:id/reply',
     { preHandler: [authenticateToken, tenantScopeGuard] },

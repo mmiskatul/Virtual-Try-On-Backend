@@ -1,3 +1,4 @@
+import { resolveTryOnSettings } from './tryon_settings.js';
 import crypto from 'node:crypto';
 import { aiServiceHeaders } from '../../infrastructure/service_auth.js';
 import { EventEmitter } from 'node:events';
@@ -230,6 +231,9 @@ export class TryOnOrchestrator {
     const tenant = db.getTenantById(product.tenantId);
     if (!tenant || tenant.status !== 'ACTIVE') {
       return { ok: false as const, status: 403, error: 'TenantSuspended', message: 'Brand tenant is inactive or suspended.' };
+    }
+    if (!resolveTryOnSettings(tenant).enabled) {
+      return { ok: false as const, status: 403, error: 'TryOnDisabled', message: 'This shop has turned virtual try-on off.' };
     }
 
     const isTenantAuthorized = input.isSuperAdmin || input.callerTenantId === product.tenantId;

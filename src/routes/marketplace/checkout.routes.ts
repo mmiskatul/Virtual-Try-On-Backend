@@ -1,3 +1,4 @@
+import { commerceEngagementService } from '../../modules/commerce/engagement.service.js';
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { resolveOptionalAuthUser } from '../../infrastructure/auth.guard.js';
@@ -233,6 +234,12 @@ export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
         db.createOrder(newOrder);
         return newOrder;
       });
+
+      commerceEngagementService.notifyTenant(
+        validation.tenantId,
+        'New order',
+        `Order ${order.id} was placed (৳${Number(order.totalAmount).toLocaleString()}).`
+      );
 
       return reply.status(201).send({
         message: 'Order placed successfully',

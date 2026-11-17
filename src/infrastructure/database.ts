@@ -699,6 +699,10 @@ export class Database {
     return this.data.users.find(u => u.id === id);
   }
 
+  public getUsersByTenant(tenantId: string): User[] {
+    return this.data.users.filter(u => u.tenantId === tenantId);
+  }
+
   public createUser(user: User): User {
     const normalized: User = {
       ...user,

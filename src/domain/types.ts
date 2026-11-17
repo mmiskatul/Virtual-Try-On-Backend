@@ -20,7 +20,37 @@ export const STOREFRONT_HEADER_STYLES = [
 
 export type StorefrontHeaderStyle = (typeof STOREFRONT_HEADER_STYLES)[number];
 
+/** Public try-on experience settings saved per brand (inside storefrontSettings, no extra column needed). */
+export interface TryOnSettings {
+  enabled: boolean;
+  publicPageActive: boolean;
+  requireConsent: boolean;
+  retentionDays: number;
+  privacyPolicyUrl: string;
+  termsUrl: string;
+  dataProcessingNotice: string;
+  appearance: {
+    pageTitle: string;
+    pageDescription: string;
+    uploadInstructions: string;
+    primaryBtnText: string;
+    uploadBtnText: string;
+    generateBtnText: string;
+    retryBtnText: string;
+    loadingText: string;
+    successText: string;
+    errorText: string;
+    accentColor: string;
+    backgroundColor: string;
+    gridStyle: '3-col' | '4-col' | 'editorial';
+    previewLayout: 'split' | 'centered';
+    showPrices: boolean;
+    showRatings: boolean;
+  };
+}
+
 export interface StorefrontSettings {
+  tryOn?: TryOnSettings;
   primaryColor?: string;
   secondaryColor?: string;
   accentColor?: string;

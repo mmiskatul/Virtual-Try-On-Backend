@@ -134,6 +134,18 @@ export class CommerceEngagementService {
   }
 
   // --- Reviews ---
+  /** All reviews for one brand (newest first), with the product name for display. */
+  public listBrandReviews(tenantId: string) {
+    const out: Array<ReviewDto & { productName: string }> = [];
+    for (const [productId, reviews] of memoryReviews.entries()) {
+      for (const r of reviews) {
+        if (r.tenantId !== tenantId) continue;
+        out.push({ ...r, productName: db.getProductById(productId)?.name || 'Product' });
+      }
+    }
+    return out.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
   public listProductReviews(productId: string) {
     const list = memoryReviews.get(productId) || [];
     const avg = list.length > 0 ? Number((list.reduce((s, r) => s + r.rating, 0) / list.length).toFixed(2)) : 0;
@@ -200,6 +212,8 @@ export class CommerceEngagementService {
       }
     }
 
+    this.notifyTenant(product.tenantId, 'New product review', `${input.userName} left a ${input.rating}-star review on ${product.name}.`);
+
     return { ok: true as const, review };
   }
 
@@ -254,6 +268,15 @@ export class CommerceEngagementService {
     };
     memoryNotifications.set(userId, [item, ...list]);
     return item;
+  }
+
+  /** Notify everyone who manages a brand (owner and managers). */
+  public notifyTenant(tenantId: string, title: string, body: string) {
+    for (const user of db.getUsersByTenant(tenantId)) {
+      if (user.role === 'BRAND_OWNER' || user.role === 'STORE_MANAGER') {
+        this.notifyUser(user.id, title, body, tenantId);
+      }
+    }
   }
 
   public listNotifications(userId: string) {

@@ -24,6 +24,7 @@ import { brandStorefrontRoutes } from './routes/brand/storefront.routes.js';
 import { brandProfileRoutes } from './routes/brand/profile.routes.js';
 import { brandUploadRoutes } from './routes/brand/upload.routes.js';
 import { brandOverviewRoutes } from './routes/brand/overview.routes.js';
+import { brandTryOnConfigRoutes } from './routes/brand/tryon_config.routes.js';
 
 import { marketplaceCatalogRoutes } from './routes/marketplace/catalog.routes.js';
 import { marketplaceCatalogV2Routes } from './routes/marketplace/catalog_v2.routes.js';
@@ -163,6 +164,7 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
     app.register(brandProfileRoutes);
     app.register(brandUploadRoutes);
     app.register(brandOverviewRoutes);
+    app.register(brandTryOnConfigRoutes);
   }
 
   if (domain === 'marketplace' || domain === 'all') {

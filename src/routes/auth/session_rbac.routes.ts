@@ -1,3 +1,5 @@
+import { validateStrongPassword } from './auth.service.js';
+import { loginThrottle } from '../../infrastructure/rate_limiting.js';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { db } from '../../infrastructure/database.js';
@@ -78,6 +80,57 @@ export async function sessionRbacRoutes(app: FastifyInstance) {
     });
 
     return okResponse({ revoked: true, sessionId: id }, request.correlationId);
+  });
+
+  // Change password: needs the current password, signs out every OTHER device, keeps this session.
+  app.post('/api/v1/auth/change-password', { preHandler: [authenticateToken] }, async (request: FastifyRequest, reply: FastifyReply) => {
+    const body = (request.body as any) || {};
+    const currentPassword = typeof body.currentPassword === 'string' ? body.currentPassword : '';
+    const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+    if (!currentPassword || !newPassword) {
+      return reply.status(400).send({ error: 'ValidationError', message: 'Current and new password are required.' });
+    }
+    const user = db.getUserById(request.authUser!.id);
+    if (!user) return reply.status(404).send({ error: 'NotFound', message: 'Account not found.' });
+
+    const lockedFor = loginThrottle.lockedFor('change-password', user.email);
+    if (lockedFor > 0) {
+      reply.header('Retry-After', String(lockedFor));
+      return reply.status(429).send({ error: 'TooManyRequests', message: 'Too many failed attempts. Try again later.' });
+    }
+    if (!db.verifyPassword(currentPassword, user.passwordHash)) {
+      loginThrottle.recordFailure('change-password', user.email);
+      return reply.status(400).send({ error: 'InvalidPassword', message: 'Your current password is not correct.' });
+    }
+    loginThrottle.clear('change-password', user.email);
+
+    const policyError = validateStrongPassword(newPassword);
+    if (policyError) return reply.status(400).send({ error: 'WeakPassword', message: policyError });
+    if (newPassword === currentPassword) {
+      return reply.status(400).send({ error: 'WeakPassword', message: 'Choose a password you have not used just now.' });
+    }
+
+    db.updateUser(user.id, { passwordHash: db.hashPassword(newPassword) });
+
+    let revokedOthers = 0;
+    for (const s of await listUserSessions(user.id)) {
+      if (s.id !== request.sessionId && !s.revokedAt) {
+        await revokeUserSession(s.id);
+        revokedOthers += 1;
+      }
+    }
+    await recordAudit({
+      actorId: user.id,
+      actorRole: user.role,
+      tenantId: user.tenantId,
+      action: 'AUTH_PASSWORD_CHANGED',
+      entity: 'User',
+      entityId: user.id,
+      correlationId: request.correlationId,
+      ipAddress: request.ip,
+      details: { revokedOtherSessions: revokedOthers },
+    });
+    return okResponse({ changed: true, revokedOtherSessions: revokedOthers }, request.correlationId);
   });
 
   // Revoke all active sessions for current user
