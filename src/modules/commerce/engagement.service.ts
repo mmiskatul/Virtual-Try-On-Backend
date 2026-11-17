@@ -267,7 +267,110 @@ export class CommerceEngagementService {
       createdAt: new Date().toISOString(),
     };
     memoryNotifications.set(userId, [item, ...list]);
+    void this.persistNotification(item);
     return item;
+  }
+
+  // --- Durability: notifications and reviews survive a restart ---
+  private async persistNotification(item: NotificationDto) {
+    const prisma = getGlobalPrisma();
+    if (!prisma || !item.userId) return;
+    try {
+      const user = db.getUserById(item.userId);
+      const profile = await prisma.userProfile.upsert({
+        where: { userId: item.userId },
+        update: {},
+        create: { userId: item.userId, displayName: user?.name || 'User' },
+      });
+      await prisma.notification.create({
+        data: {
+          id: item.id,
+          userProfileId: profile.id,
+          tenantId: item.tenantId ?? null,
+          channel: item.channel,
+          title: item.title.slice(0, 255),
+          body: item.body,
+          createdAt: new Date(item.createdAt),
+        },
+      });
+    } catch (err: any) {
+      logger.warn({ err: err?.message }, 'commerce.notification_persist_warning');
+    }
+  }
+
+  private async persistNotificationRead(id: string, readAt: string) {
+    const prisma = getGlobalPrisma();
+    if (!prisma) return;
+    try {
+      await prisma.notification.updateMany({ where: { id }, data: { readAt: new Date(readAt) } });
+    } catch (err: any) {
+      logger.warn({ err: err?.message }, 'commerce.notification_read_persist_warning');
+    }
+  }
+
+  /** Loads saved reviews and notifications into memory. Anything already created since startup is kept. */
+  public async hydrateFromPrisma(): Promise<{ reviews: number; notifications: number }> {
+    const prisma = getGlobalPrisma();
+    if (!prisma) return { reviews: 0, notifications: 0 };
+
+    let reviewCount = 0;
+    const reviewRows = await prisma.review.findMany({ include: { userProfile: true }, orderBy: { createdAt: 'desc' } });
+    for (const r of reviewRows) {
+      const known = memoryReviews.get(r.productId) || [];
+      if (known.some((x) => x.id === r.id)) continue;
+      known.push({
+        id: r.id,
+        tenantId: r.tenantId,
+        productId: r.productId,
+        userId: r.userProfile?.userId || '',
+        authorName: r.userProfile?.displayName || 'Customer',
+        rating: r.rating,
+        comment: r.comment,
+        verifiedBuy: r.verifiedBuy,
+        brandReply: r.brandReply || undefined,
+        createdAt: r.createdAt.toISOString(),
+      } as ReviewDto);
+      memoryReviews.set(r.productId, known.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+      reviewCount++;
+    }
+
+    let noteCount = 0;
+    const noteRows = await prisma.notification.findMany({ include: { userProfile: true }, orderBy: { createdAt: 'desc' }, take: 5000 });
+    for (const n of noteRows) {
+      const userId = n.userProfile?.userId;
+      if (!userId) continue;
+      const known = memoryNotifications.get(userId) || [];
+      if (known.some((x) => x.id === n.id)) continue;
+      known.push({
+        id: n.id,
+        userId,
+        tenantId: n.tenantId || undefined,
+        channel: (n.channel as NotificationDto['channel']) || 'IN_APP',
+        title: n.title,
+        body: n.body,
+        readAt: n.readAt ? n.readAt.toISOString() : undefined,
+        createdAt: n.createdAt.toISOString(),
+      });
+      memoryNotifications.set(userId, known.sort((a, b) => b.createdAt.localeCompare(a.createdAt)));
+      noteCount++;
+    }
+    return { reviews: reviewCount, notifications: noteCount };
+  }
+
+  /** Called once at startup. The database connects in the background, so wait for it (up to ~30 seconds). */
+  public async startHydration(): Promise<void> {
+    for (let i = 0; i < 60; i++) {
+      if (getGlobalPrisma()) {
+        try {
+          const res = await this.hydrateFromPrisma();
+          logger.info({ ...res }, 'commerce.engagement_hydrated');
+        } catch (err: any) {
+          logger.warn({ err: err?.message }, 'commerce.engagement_hydrate_warning');
+        }
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
   }
 
   /** Notify everyone who manages a brand (owner and managers). */
@@ -288,6 +391,7 @@ export class CommerceEngagementService {
     const target = list.find((n) => n.id === notificationId);
     if (!target) return null;
     target.readAt = new Date().toISOString();
+    void this.persistNotificationRead(notificationId, target.readAt);
     return target;
   }
 

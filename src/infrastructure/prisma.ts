@@ -72,6 +72,17 @@ export function initGlobalPrisma(connectionString: string): PrismaClient {
   return activePrisma;
 }
 
+/**
+ * Shares the connection the main database layer already opened, so every module that persists through
+ * getGlobalPrisma() (audit logs, login sessions, billing, reviews, notifications) really reaches the database.
+ */
+export function adoptGlobalPrisma(prisma: PrismaClient, pool: pg.Pool | null): void {
+  if (!activePrisma) {
+    activePrisma = prisma;
+    activePool = pool;
+  }
+}
+
 export function getGlobalPrisma(): PrismaClient | null {
   return activePrisma;
 }

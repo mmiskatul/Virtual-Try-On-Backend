@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import pg from 'pg';
-import { createPrismaInstance, disconnectPrisma } from './prisma.js';
+import { createPrismaInstance, disconnectPrisma, adoptGlobalPrisma } from './prisma.js';
 import {
   Tenant,
   User,
@@ -62,6 +62,7 @@ export class PrismaDatabase {
       // Test connection with a lightweight query
       await this.prisma.$queryRaw`SELECT 1`;
       this.connected = true;
+      adoptGlobalPrisma(this.prisma, this.pool);
       console.log('[Prisma DB] Successfully connected to PostgreSQL database via Prisma ORM!');
 
       // Check if seeded

@@ -587,7 +587,21 @@ export async function rotateRefreshSession(
     return { ok: false, reason: 'refresh_reuse_detected', sid };
   }
 
-  const rawState = await redisAdapter.get(refreshStateKey(sid));
+  let rawState = await redisAdapter.get(refreshStateKey(sid));
+  if (!rawState && !redisAdapter.isConnected() && typeof decoded.exp === 'number' && decoded.exp * 1000 > Date.now()) {
+    // Restart without Redis: the rotation state lived in memory and is gone, but the token is validly
+    // signed and the session is still active in the database. Rebuild the state so nobody is signed out
+    // by a deploy. (With Redis connected this never happens and a missing state is still refused.)
+    logger.warn({ sid, userId: decoded.userId }, 'auth.refresh_state_rebuilt_after_restart');
+    const rebuilt: RefreshTokenState = {
+      jti: decoded.jti,
+      userId: decoded.userId,
+      role: '',
+      portal,
+      expiresAtMs: decoded.exp * 1000,
+    };
+    rawState = JSON.stringify(rebuilt);
+  }
   if (!rawState) {
     return { ok: false, reason: 'refresh_state_missing', sid };
   }

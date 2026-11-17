@@ -5,6 +5,7 @@ import { getValidatedEnv } from './infrastructure/env.schema.js';
 import { redisAdapter } from './infrastructure/redis.js';
 import { rabbitMqBus } from './infrastructure/rabbitmq.js';
 import { outboxRelayWorker } from './infrastructure/outbox.js';
+import { commerceEngagementService } from './modules/commerce/engagement.service.js';
 
 async function bootstrap() {
   const env = getValidatedEnv();
@@ -19,6 +20,7 @@ async function bootstrap() {
   }
 
   const app = createApp('all');
+  void commerceEngagementService.startHydration(); // reload saved reviews and notifications after a restart
 
   try {
     await app.listen({ port: config.port, host: config.host });
