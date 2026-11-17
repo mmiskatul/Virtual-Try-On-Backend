@@ -35,11 +35,25 @@ export const config = {
   vtonProvider: 'gemini', // Runtime selector updated via Super Admin AI Engine UI
 
   // CORS: comma-separated list of allowed frontend origins (e.g. https://shop.example.com,http://localhost:3000).
-  // Empty = allow any origin (development only).
-  corsOrigins: (process.env.CORS_ORIGINS || '')
-    .split(',')
-    .map((o) => o.trim().replace(/\/+$/, ''))
-    .filter(Boolean),
+  // The official domains above are always included; CORS_ORIGINS only adds extras.
+  corsOrigins: Array.from(
+    new Set([
+      // Official V-TRY Studio production frontends (always trusted).
+      'https://vtrystudio.com',
+      'https://www.vtrystudio.com',
+      'https://shop.brand.vtrystudio.com',
+      'https://admin.vtrystudio.com',
+      // Local development frontends (never in production).
+      ...(process.env.NODE_ENV === 'production'
+        ? []
+        : ['http://localhost:3000', 'http://localhost:3001', 'http://localhost:3002']),
+      // Extra origins from env (comma-separated).
+      ...(process.env.CORS_ORIGINS || '')
+        .split(',')
+        .map((o) => o.trim().replace(/\/+$/, ''))
+        .filter(Boolean),
+    ]),
+  ),
 
   // Database (Supabase PostgreSQL / PostgreSQL)
   databaseUrl: process.env.DATABASE_URL || '',

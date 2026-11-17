@@ -173,12 +173,18 @@ function serializeCookie(
     path?: string;
   },
 ): string {
+  // COOKIE_DOMAIN (e.g. ".vtrystudio.com") lets api.* set cookies that the
+  // shop.brand.* / admin.* / apex frontends can read. Unset = host-only (local dev).
+  const cookieDomain = (process.env.COOKIE_DOMAIN || '').trim();
   const parts = [
     `${name}=${encodeURIComponent(value)}`,
     `Path=${options.path || '/'}`,
     `Max-Age=${Math.max(0, Math.floor(options.maxAge))}`,
     `SameSite=${options.sameSite || 'Lax'}`,
   ];
+  if (cookieDomain && /^\.?[a-z0-9.-]+$/i.test(cookieDomain)) {
+    parts.push(`Domain=${cookieDomain}`);
+  }
   if (options.httpOnly !== false) {
     parts.push('HttpOnly');
   }
