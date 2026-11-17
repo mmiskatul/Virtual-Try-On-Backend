@@ -31,8 +31,9 @@ async function runTests() {
 
   const rootRes = await app.inject({ method: 'GET', url: '/' });
   const rootBody = JSON.parse(rootRes.body);
-  assert(rootRes.statusCode === 200 && rootBody.status === 'UP' && !!rootBody.version && !!rootBody.endpoints, 'GET / returns service details');
-  assert(!/postgres|api[_-]?key|secret|password/i.test(rootRes.body.replace(/PostgreSQL/gi, '')), 'GET / leaks no secrets or connection strings');
+  assert(rootRes.statusCode === 200 && rootBody.status === 'UP', 'GET / returns a minimal UP status');
+  assert(!rootBody.database && !rootBody.integrations && !rootBody.endpoints && !rootBody.environment, 'GET / exposes no infrastructure or route details');
+  assert(!/postgres|api[_-]?key|secret|password/i.test(rootRes.body), 'GET / leaks no secrets or connection strings');
   assert((await app.inject({ method: 'HEAD', url: '/' })).statusCode === 200, 'HEAD / returns 200');
 
   const corsOk = await app.inject({ method: 'GET', url: '/health', headers: { origin: 'http://localhost:3001' } });
