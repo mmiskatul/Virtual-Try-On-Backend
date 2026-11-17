@@ -88,8 +88,45 @@ export interface TeamInviteRecord {
   settledAt?: number;
 }
 
+export type ApiScope = 'products:read' | 'products:write' | 'orders:read' | 'orders:write';
+export const API_SCOPES: ApiScope[] = ['products:read', 'products:write', 'orders:read', 'orders:write'];
+
+/** A server-generated API key. Only a hash is stored: the key itself is shown once, at creation. */
+export interface ApiKeyRecord {
+  id: string;
+  name: string;
+  last4: string;
+  hash: string;
+  scopes: ApiScope[];
+  createdAt: number;
+  createdBy: string;
+  expiresAt: number | null;
+  lastUsedAt: number | null;
+  status: 'ACTIVE' | 'REVOKED';
+  revokedAt?: number;
+}
+
+export type WebhookEventType = 'order.created' | 'order.status_changed' | 'inventory.low_stock' | 'ping';
+export const WEBHOOK_EVENTS: Exclude<WebhookEventType, 'ping'>[] = ['order.created', 'order.status_changed', 'inventory.low_stock'];
+
+export interface WebhookEndpointRecord {
+  id: string;
+  url: string;
+  description?: string;
+  events: Exclude<WebhookEventType, 'ping'>[];
+  secretEnc: string; // encrypted at rest; never returned by the API after creation
+  active: boolean;
+  createdAt: number;
+  consecutiveFailures: number;
+  lastDeliveryAt: number | null;
+  lastStatus: 'SUCCESS' | 'FAILED' | null;
+  disabledReason?: string;
+}
+
 export interface StorefrontSettings {
   tryOn?: TryOnSettings;
+  apiKeys?: ApiKeyRecord[];
+  webhooks?: WebhookEndpointRecord[];
   discounts?: DiscountRecord[];
   teamInvites?: TeamInviteRecord[];
   primaryColor?: string;

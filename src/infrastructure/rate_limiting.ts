@@ -23,6 +23,7 @@ const TRYON_PUBLIC = /^\/api\/v1\/try-on\/(direct|submit|upload|upload-url|jobs)
 
 function categoryOf(req: FastifyRequest): Category {
   const path = req.url.split('?')[0];
+  if (path.startsWith('/api/v1/public/')) return { name: 'public-api', max: 120 };
   if (req.method === 'POST' && AUTH_SENSITIVE.test(path)) return { name: 'auth', max: 10 };
   if (req.method === 'POST' && AUTH_REFRESH.test(path)) return { name: 'refresh', max: 30 };
   if (req.method === 'POST' && TRYON_PUBLIC.test(path)) return { name: 'tryon', max: 12 };
@@ -34,7 +35,12 @@ export function registerRateLimiting(app: FastifyInstance): void {
     global: true,
     timeWindow: '1 minute',
     max: (req: FastifyRequest) => categoryOf(req).max,
-    keyGenerator: (req: FastifyRequest) => `${categoryOf(req).name}:${req.ip}`,
+    keyGenerator: (req: FastifyRequest) => {
+      const cat = categoryOf(req);
+      // API keys get their own bucket (so one busy integration cannot starve another); bad guesses share the IP bucket
+      const key = cat.name === 'public-api' ? String(req.headers['x-api-key'] || '').slice(0, 40) : '';
+      return `${cat.name}:${req.ip}:${key}`;
+    },
     allowList: (req: FastifyRequest) => {
       if (disabled()) return true;
       const path = req.url.split('?')[0];

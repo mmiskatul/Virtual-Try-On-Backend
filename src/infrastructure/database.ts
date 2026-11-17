@@ -1,3 +1,4 @@
+import { domainEvents } from './domain_events.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -22,6 +23,8 @@ export interface DatabaseCollections {
   generationJobs: GenerationJob[];
   usageLedger: UsageLedgerEntry[];
 }
+
+const LOW_STOCK_THRESHOLD = 5;
 
 export class Database {
   private data: DatabaseCollections = {
@@ -992,9 +995,13 @@ export class Database {
       };
     }
 
+    const previousStock = variant.stockQuantity;
     variant.stockQuantity = nextStock;
     variant.available = nextStock > 0;
     product.updatedAt = Date.now();
+    if (previousStock > LOW_STOCK_THRESHOLD && nextStock <= LOW_STOCK_THRESHOLD) {
+      domainEvents.emitSafe('inventory.low_stock', { tenantId, productId, productName: product.name, variantSku, stock: nextStock });
+    }
 
     const log: InventoryLog = {
       id: `inv_log_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -1047,6 +1054,7 @@ export class Database {
   public createOrder(order: Order): Order {
     this.data.orders.push(order);
     this.save();
+    domainEvents.emitSafe('order.created', order);
     if (!this.skipAsyncHydration) {
       this.enqueuePrismaSync(async (prisma) => {
         await prisma.createOrder(order);
@@ -1058,9 +1066,11 @@ export class Database {
   public updateOrderStatus(id: string, tenantId: string, status: Order['status']): Order | undefined {
     const order = this.data.orders.find(o => o.id === id && o.tenantId === tenantId);
     if (!order) return undefined;
+    const previousStatus = order.status;
     order.status = status;
     order.updatedAt = Date.now();
     this.save();
+    if (previousStatus !== status) domainEvents.emitSafe('order.status_changed', { order, previousStatus });
     if (!this.skipAsyncHydration) {
       this.enqueuePrismaSync(async (prisma) => {
         await prisma.updateOrderStatus(id, tenantId, status);

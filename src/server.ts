@@ -28,6 +28,9 @@ import { brandTryOnConfigRoutes } from './routes/brand/tryon_config.routes.js';
 import { brandCustomerRoutes } from './routes/brand/customers.routes.js';
 import { brandDiscountRoutes } from './routes/brand/discounts.routes.js';
 import { brandTeamRoutes } from './routes/brand/team.routes.js';
+import { brandDeveloperRoutes } from './routes/brand/developer.routes.js';
+import { publicApiRoutes } from './routes/public/public_api.routes.js';
+import { wireWebhookEvents } from './modules/developer/webhooks.js';
 
 import { marketplaceCatalogRoutes } from './routes/marketplace/catalog.routes.js';
 import { marketplaceCatalogV2Routes } from './routes/marketplace/catalog_v2.routes.js';
@@ -52,6 +55,7 @@ import { billingRoutes } from './routes/billing/billing.routes.js';
 export type AppDomain = 'brand' | 'marketplace' | 'admin' | 'all';
 
 export function createApp(domain: AppDomain = 'all'): FastifyInstance {
+  wireWebhookEvents(); // once per process: webhooks react to order and stock events
   const app = fastify({
     logger: false,
     trustProxy: config.trustProxy,
@@ -171,6 +175,8 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
     app.register(brandCustomerRoutes);
     app.register(brandDiscountRoutes);
     app.register(brandTeamRoutes);
+    app.register(brandDeveloperRoutes);
+    app.register(publicApiRoutes);
   }
 
   if (domain === 'marketplace' || domain === 'all') {

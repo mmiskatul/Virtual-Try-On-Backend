@@ -9,3 +9,6 @@ process.env.SEED_ADMIN_EMAIL = 'admin@vton-platform.io';
 // Tests use many Bearer-only requests and hammer the same endpoints; production keeps both protections on.
 process.env.RATE_LIMIT_DISABLED = 'true';
 process.env.ALLOW_BEARER_WITHOUT_SESSION = 'true';
+// Webhook tests deliver to a local server and retry quickly.
+process.env.WEBHOOK_ALLOW_PRIVATE = 'true';
+process.env.WEBHOOK_RETRY_DELAYS_MS = '20,20';
