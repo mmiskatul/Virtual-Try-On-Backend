@@ -65,7 +65,8 @@ export const config = {
       ...(process.env.CORS_ORIGINS || '')
         .split(',')
         .map((o) => o.trim().replace(/\/+$/, ''))
-        .filter(Boolean),
+        // A wildcard cannot be combined with sign-in cookies (browsers reject it), so it is ignored: list real origins instead.
+        .filter((o) => Boolean(o) && o !== '*'),
     ]),
   ),
 
