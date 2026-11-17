@@ -280,19 +280,16 @@ export class Database {
     this.save();
   }
 
-  private seedPasswordCache: string | null = null;
-
   /**
-   * Only the platform super admin is seeded. Its password comes from SEED_ADMIN_PASSWORD (.env);
-   * if unset, a random one is generated and printed once. Shops and customers register themselves.
+   * Only the platform super admin is seeded, and only for the email in SEED_ADMIN_EMAIL (.env).
+   * The admin signs in with Google, so no usable password is created. A password exists only if
+   * SEED_ADMIN_PASSWORD is set explicitly (used by automated tests). Shops and customers register themselves.
    */
   private seedAdminPassword(): string {
     const fromEnv = process.env.SEED_ADMIN_PASSWORD;
     if (fromEnv && fromEnv.length >= 8) return fromEnv;
-    if (this.seedPasswordCache) return this.seedPasswordCache;
-    this.seedPasswordCache = crypto.randomBytes(12).toString('base64url');
-    console.warn(`[Seed] SEED_ADMIN_PASSWORD not set. Generated one-time super admin password: ${this.seedPasswordCache}  (set SEED_ADMIN_PASSWORD in .env to choose your own)`);
-    return this.seedPasswordCache;
+    // Random and never shown to anyone: password sign-in stays closed.
+    return crypto.randomBytes(32).toString('base64url');
   }
 
   /** .env is the source of truth for the super admin password: existing admin account is synced at startup. */
@@ -307,8 +304,11 @@ export class Database {
       updates.email = email;
     }
     const wanted = process.env.SEED_ADMIN_PASSWORD;
-    if (wanted && wanted.length >= 8 && !this.verifyPassword(wanted, user.passwordHash)) {
-      updates.passwordHash = this.hashPassword(wanted);
+    if (wanted && wanted.length >= 8) {
+      if (!this.verifyPassword(wanted, user.passwordHash)) updates.passwordHash = this.hashPassword(wanted);
+    } else if (user.passwordHash.startsWith('scrypt$')) {
+      // Google-only: retire any password this account had from an earlier setup (once; it stays retired).
+      updates.passwordHash = `disabled$${crypto.randomBytes(24).toString('base64url')}`;
     }
     if (Object.keys(updates).length === 0) return;
 
@@ -423,10 +423,14 @@ export class Database {
     this.data.tenants = [tenant1, tenant2];
 
     // 2. Seed Users
+    const adminEmail = (process.env.SEED_ADMIN_EMAIL || '').trim().toLowerCase();
+    if (!adminEmail) {
+      console.warn('[Seed] SEED_ADMIN_EMAIL is not set, so no super admin exists. Set it in .env to your Google email and sign in with Google.');
+    }
     const superAdmin: User = {
       id: 'user_admin',
       name: 'Platform Super Admin',
-      email: (process.env.SEED_ADMIN_EMAIL || 'admin@vton-platform.io').trim().toLowerCase(),
+      email: adminEmail,
       passwordHash: this.hashPassword(this.seedAdminPassword()),
       role: 'SUPER_ADMIN',
       emailVerified: true,
@@ -434,7 +438,7 @@ export class Database {
       createdAt: now
     };
 
-    this.data.users = [superAdmin]; // shops and customers register their own accounts
+    this.data.users = adminEmail ? [superAdmin] : []; // shops and customers register their own accounts
     this.data.authTokens = [];
 
     // 3. Seed Fabrics
