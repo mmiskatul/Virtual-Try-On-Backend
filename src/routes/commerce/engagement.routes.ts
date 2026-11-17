@@ -1,6 +1,6 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import { authenticateToken, requireShopperPortal } from '../../infrastructure/auth.guard.js';
 import { okResponse } from '../../infrastructure/http.js';
 import { tenantScopeGuard } from '../../modules/tenants/tenant.scope.js';
 import { commerceEngagementService } from '../../modules/commerce/engagement.service.js';
@@ -30,12 +30,12 @@ const CustomerTicketSchema = z.object({
 
 export async function commerceEngagementRoutes(app: FastifyInstance) {
   // Server-Side Multi-Seller Cart
-  app.get('/api/v1/cart', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
+  app.get('/api/v1/cart', { preHandler: [authenticateToken, requireShopperPortal] }, async (request: FastifyRequest) => {
     const cart = commerceEngagementService.getCart(request.authUser!.id);
     return okResponse(cart, request.correlationId);
   });
 
-  app.post('/api/v1/cart/items', { preHandler: [authenticateToken] }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/cart/items', { preHandler: [authenticateToken, requireShopperPortal] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const parsed = AddCartItemSchema.safeParse(request.body || {});
     if (!parsed.success) {
       return reply.status(400).send({ error: 'ValidationError', message: parsed.error.issues.map((i) => i.message).join('; ') });
@@ -45,14 +45,14 @@ export async function commerceEngagementRoutes(app: FastifyInstance) {
     return okResponse(res.cart, request.correlationId);
   });
 
-  app.delete('/api/v1/cart/items/:sku', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
+  app.delete('/api/v1/cart/items/:sku', { preHandler: [authenticateToken, requireShopperPortal] }, async (request: FastifyRequest) => {
     const { sku } = request.params as { sku: string };
     const cart = commerceEngagementService.removeFromCart(request.authUser!.id, sku);
     return okResponse(cart, request.correlationId);
   });
 
   // Customer / Brand Scoped Orders
-  app.get('/api/v1/orders', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
+  app.get('/api/v1/orders', { preHandler: [authenticateToken, requireShopperPortal] }, async (request: FastifyRequest) => {
     const orders = commerceEngagementService.listOrdersForUser(
       request.authUser!.id,
       request.authUser!.email,
@@ -62,11 +62,11 @@ export async function commerceEngagementRoutes(app: FastifyInstance) {
   });
 
   // Favorites
-  app.get('/api/v1/favorites', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
+  app.get('/api/v1/favorites', { preHandler: [authenticateToken, requireShopperPortal] }, async (request: FastifyRequest) => {
     return okResponse({ productIds: commerceEngagementService.listFavorites(request.authUser!.id) }, request.correlationId);
   });
 
-  app.post('/api/v1/favorites', { preHandler: [authenticateToken] }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/favorites', { preHandler: [authenticateToken, requireShopperPortal] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { productId } = (request.body as { productId?: string }) || {};
     if (!productId) return reply.status(400).send({ error: 'ValidationError', message: 'productId is required.' });
     const ok = await commerceEngagementService.addFavorite(request.authUser!.id, productId);
@@ -76,7 +76,7 @@ export async function commerceEngagementRoutes(app: FastifyInstance) {
     );
   });
 
-  app.delete('/api/v1/favorites/:productId', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
+  app.delete('/api/v1/favorites/:productId', { preHandler: [authenticateToken, requireShopperPortal] }, async (request: FastifyRequest) => {
     const { productId } = request.params as { productId: string };
     const productIds = await commerceEngagementService.removeFavorite(request.authUser!.id, productId);
     return okResponse({ productIds }, request.correlationId);
@@ -88,7 +88,7 @@ export async function commerceEngagementRoutes(app: FastifyInstance) {
     return okResponse(commerceEngagementService.listProductReviews(id), request.correlationId);
   });
 
-  app.post('/api/v1/products/:id/reviews', { preHandler: [authenticateToken] }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/products/:id/reviews', { preHandler: [authenticateToken, requireShopperPortal] }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const parsed = ReviewCreateSchema.safeParse(request.body || {});
     if (!parsed.success) {

@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { aiServiceHeaders } from '../../infrastructure/service_auth.js';
 import { config } from '../../infrastructure/config.js';
 import { db } from '../../infrastructure/database.js';
 import {
@@ -20,7 +21,7 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
     async (_request: FastifyRequest, reply: FastifyReply) => {
       let aiServiceCapabilities: any = null;
       try {
-        const res = await fetch(`${config.aiServiceUrl}/api/v1/models`, { signal: AbortSignal.timeout(3000) });
+        const res = await fetch(`${config.aiServiceUrl}/api/v1/models`, { headers: aiServiceHeaders(), signal: AbortSignal.timeout(3000) });
         if (res.ok) {
           aiServiceCapabilities = await res.json();
         }

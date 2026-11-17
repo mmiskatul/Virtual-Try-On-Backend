@@ -22,6 +22,7 @@ const envSchema = z.object({
   RABBITMQ_URL: z.string().optional().default(''),
   REDIS_URL: z.string().optional().default(''),
   AI_SERVICE_URL: z.string().url().default('http://localhost:8000'),
+  INTERNAL_SERVICE_KEY: z.string().optional().default(''),
   PUBLIC_BACKEND_URL: z.string().optional().default('http://localhost:4000'),
 
   // Storage & AI Providers

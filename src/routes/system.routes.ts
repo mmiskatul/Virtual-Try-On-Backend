@@ -56,6 +56,10 @@ export async function systemRoutes(app: FastifyInstance) {
   });
 
   app.get('/health', async () => {
+    // Public probe: no infrastructure details in production.
+    if (process.env.NODE_ENV === 'production') {
+      return { status: 'UP', timestamp: Date.now() };
+    }
     const isPrisma = db.isPrismaActive();
     const isDbSql = db.isNeonSqlActive();
     const [redisHealth, storageHealth] = await Promise.all([

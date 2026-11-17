@@ -27,6 +27,20 @@ export const config = {
   port: Number(process.env.PORT || 4000),
   jwtSecret: process.env.JWT_SECRET || '',
 
+  // Reverse proxy: when true, the real client IP comes from X-Forwarded-For (needed for rate limiting and
+  // for detecting HTTPS behind a load balancer). Defaults to true in production (managed hosts always sit
+  // behind a proxy). Set TRUST_PROXY=false if the API is exposed directly to the internet.
+  trustProxy:
+    process.env.TRUST_PROXY !== undefined
+      ? process.env.TRUST_PROXY.toLowerCase() === 'true'
+      : process.env.NODE_ENV === 'production',
+
+  // Interactive API docs expose the full API map: off in production unless ENABLE_DOCS=true.
+  enableDocs:
+    process.env.ENABLE_DOCS !== undefined
+      ? process.env.ENABLE_DOCS.toLowerCase() === 'true'
+      : process.env.NODE_ENV !== 'production',
+
   // AI Service & Vision Providers
   aiServiceUrl: process.env.AI_SERVICE_URL || 'http://localhost:8000',
   geminiApiKey: process.env.GEMINI_API_KEY || '',

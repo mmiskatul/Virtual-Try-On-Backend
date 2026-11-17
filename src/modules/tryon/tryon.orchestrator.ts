@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { aiServiceHeaders } from '../../infrastructure/service_auth.js';
 import { EventEmitter } from 'node:events';
 import { GenerationJob } from '../../domain/types.js';
 import { db } from '../../infrastructure/database.js';
@@ -445,10 +446,10 @@ export class TryOnOrchestrator {
         const endpoint = `${env.AI_SERVICE_URL.replace(/\/$/, '')}/internal/v1/try-on/execute`;
         const res = await fetch(endpoint, {
           method: 'POST',
-          headers: {
+          headers: aiServiceHeaders({
             'Content-Type': 'application/json',
             'X-Correlation-Id': event.correlationId,
-          },
+          }),
           body: JSON.stringify(event),
         });
         if (!res.ok) {

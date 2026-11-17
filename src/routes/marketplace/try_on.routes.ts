@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { aiServiceHeaders } from '../../infrastructure/service_auth.js';
 import { config } from '../../infrastructure/config.js';
 import { db } from '../../infrastructure/database.js';
 import { externalVtonService } from '../../infrastructure/vton_api.js';
@@ -111,7 +112,6 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
       mode: isExternal ? 'external_api' : 'local_ai_service',
       provider,
       externalConfigured: isExternal,
-      engineUrl: isExternal ? `Cloud API (${provider})` : config.aiServiceUrl,
       status: 'ready'
     };
   });
@@ -181,7 +181,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
     try {
       const response = await fetch(`${config.aiServiceUrl}/api/v1/try-on/jobs`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: aiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           personImage,
           garmentImage,
@@ -239,7 +239,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
     try {
       const response = await fetch(`${config.aiServiceUrl}/api/v1/try-on`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: aiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           personImage,
           garmentImage,
@@ -401,7 +401,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
 
     // Check local AI service
     try {
-      const response = await fetch(`${config.aiServiceUrl}/api/v1/try-on/jobs/${jobId}`);
+      const response = await fetch(`${config.aiServiceUrl}/api/v1/try-on/jobs/${jobId}`, { headers: aiServiceHeaders() });
       if (!response.ok) {
         return reply.status(response.status).send({ error: 'AiServiceError', message: 'Could not fetch job status.' });
       }

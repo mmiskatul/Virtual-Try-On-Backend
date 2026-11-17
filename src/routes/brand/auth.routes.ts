@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { loginThrottle } from '../../infrastructure/rate_limiting.js';
 import crypto from 'node:crypto';
 import { db } from '../../infrastructure/database.js';
 import { authenticateToken, requirePortalRole } from '../../infrastructure/auth.guard.js';
@@ -320,10 +321,21 @@ export async function brandAuthRoutes(app: FastifyInstance) {
     }
 
     const email = normalizeEmail(rawEmail);
+    const lockedFor = loginThrottle.lockedFor('brand', email);
+    if (lockedFor > 0) {
+      reply.header('Retry-After', String(lockedFor));
+      return reply.status(429).send({
+        error: 'TooManyRequests',
+        code: 'ACCOUNT_TEMPORARILY_LOCKED',
+        message: `Too many failed sign-in attempts. Try again in ${Math.ceil(lockedFor / 60)} minute(s).`,
+      });
+    }
     const user = db.getUserByEmail(email);
     if (!user || !db.verifyPassword(password, user.passwordHash)) {
+      loginThrottle.recordFailure('brand', email);
       return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid email or password' });
     }
+    loginThrottle.clear('brand', email);
 
     if (!BRAND_MEMBER_ROLE_CODES.has(user.role)) {
       return reply.status(403).send({

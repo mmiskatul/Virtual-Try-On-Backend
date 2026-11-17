@@ -9,6 +9,7 @@ import { observability } from './infrastructure/observability.js';
 import { sanitizeObject } from './infrastructure/sanitization.js';
 import { resolveCorrelationId } from './infrastructure/http.js';
 import { globalErrorHandler, notFoundHandler } from './infrastructure/errors.js';
+import { registerRateLimiting } from './infrastructure/rate_limiting.js';
 
 // Route handlers
 import { systemRoutes } from './routes/system.routes.js';
@@ -49,8 +50,12 @@ export type AppDomain = 'brand' | 'marketplace' | 'admin' | 'all';
 export function createApp(domain: AppDomain = 'all'): FastifyInstance {
   const app = fastify({
     logger: false,
+    trustProxy: config.trustProxy,
     bodyLimit: 10 * 1024 * 1024 // 10MB
   });
+
+  // Throttling (per-IP, plus stricter limits on auth and anonymous try-on routes)
+  registerRateLimiting(app);
 
   // CORS Configuration
   app.register(cors, {
@@ -87,28 +92,31 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
   });
 
   // OpenAPI 3.1 / Swagger Documentation
-  app.register(swagger, {
-    openapi: {
-      openapi: '3.1.0',
-      info: {
-        title: 'Multi-Tenant Virtual Try-On SaaS API',
-        version: '2.1.0',
-        description: 'Unified Fastify 5 platform API for Customer Marketplace, Brand Dashboard, and Super Admin Control Plane.',
-      },
-      components: {
-        securitySchemes: {
-          bearerAuth: {
-            type: 'http',
-            scheme: 'bearer',
-            bearerFormat: 'JWT',
+  if (config.enableDocs) {
+    app.register(swagger, {
+      openapi: {
+        openapi: '3.1.0',
+        info: {
+          title: 'Multi-Tenant Virtual Try-On SaaS API',
+          version: '2.1.0',
+          description: 'Unified Fastify 5 platform API for Customer Marketplace, Brand Dashboard, and Super Admin Control Plane.',
+        },
+        components: {
+          securitySchemes: {
+            bearerAuth: {
+              type: 'http',
+              scheme: 'bearer',
+              bearerFormat: 'JWT',
+            },
           },
         },
       },
-    },
-  });
-  app.register(swaggerUi, {
-    routePrefix: '/docs',
-  });
+    });
+    app.register(swaggerUi, {
+      routePrefix: '/docs',
+    });
+
+  }
 
   // Observability & Correlation Hooks
   app.addHook('onRequest', async (request, reply) => {

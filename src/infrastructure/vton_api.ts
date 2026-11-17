@@ -1,4 +1,5 @@
 import { config } from './config.js';
+import { aiServiceHeaders } from './service_auth.js';
 
 export interface VtonJobStatus {
   jobId: string;
@@ -35,7 +36,7 @@ export class ExternalVtonService {
       const endpoint = `${config.aiServiceUrl}/api/v1/try-on/jobs`;
       const res = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: aiServiceHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify({
           personImage: payload.personImage,
           garmentImage: payload.garmentImage,

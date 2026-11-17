@@ -70,6 +70,29 @@ async function verifyTokenAndSessionBinding(
     };
   }
 
+  // A Bearer token must be accompanied by proof of its session (X-Session-Id), exactly like the cookie
+  // transport requires the session cookie. An access token alone is never enough.
+  if (!fromCookie && claims.sid && process.env.ALLOW_BEARER_WITHOUT_SESSION !== 'true') {
+    const headerSid = request.headers['x-session-id'];
+    const sidProof = typeof headerSid === 'string' ? headerSid.trim() : '';
+    if (!sidProof) {
+      return {
+        ok: false,
+        status: 401,
+        error: 'SessionMissing',
+        message: 'The X-Session-Id header is required together with a Bearer token.',
+      };
+    }
+    if (sidProof !== claims.sid) {
+      return {
+        ok: false,
+        status: 401,
+        error: 'SessionMismatch',
+        message: 'Session id does not match this token.',
+      };
+    }
+  }
+
   if (fromCookie) {
     const { token: sidCookie } = extractCookieToken(request, 'session');
     if (wantsCookieOnlyTransport(request) && claims.sid && !sidCookie) {
@@ -311,5 +334,19 @@ export function createBrandMiddleware(...extraGuards: preHandlerHookHandler[]): 
 export function registerScopedPreHandlers(app: FastifyInstance, guards: preHandlerHookHandler[]): void {
   for (const guard of guards) {
     app.addHook('preHandler', guard);
+  }
+}
+
+/**
+ * Shopper-only routes (cart, orders, favorites, ...). Brand and admin tokens are valid sessions but belong
+ * to a different portal, so they are rejected here. Use after `authenticateToken`.
+ */
+export async function requireShopperPortal(request: FastifyRequest, reply: FastifyReply) {
+  if (reply.sent) return;
+  if (request.authUser && request.authUser.role !== 'CUSTOMER') {
+    return reply.status(403).send({
+      error: 'WrongPortal',
+      message: 'This endpoint is only available to shopper accounts.',
+    });
   }
 }

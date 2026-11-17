@@ -1,7 +1,8 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { loginThrottle } from '../../infrastructure/rate_limiting.js';
 import crypto from 'node:crypto';
 import { db } from '../../infrastructure/database.js';
-import { authenticateToken } from '../../infrastructure/auth.guard.js';
+import { authenticateToken, requireShopperPortal } from '../../infrastructure/auth.guard.js';
 import { User } from '../../domain/types.js';
 import { createOAuthExchangeCode } from '../../modules/auth/jwt.verifier.js';
 import { recordAudit } from '../../modules/audit/audit.service.js';
@@ -228,13 +229,24 @@ export async function customerAuthRoutes(app: FastifyInstance) {
     }
 
     const email = normalizeEmail(rawEmail);
+    const lockedFor = loginThrottle.lockedFor('marketplace', email);
+    if (lockedFor > 0) {
+      reply.header('Retry-After', String(lockedFor));
+      return reply.status(429).send({
+        error: 'TooManyRequests',
+        code: 'ACCOUNT_TEMPORARILY_LOCKED',
+        message: `Too many failed sign-in attempts. Try again in ${Math.ceil(lockedFor / 60)} minute(s).`,
+      });
+    }
     const user = db.getUserByEmail(email);
     if (!user || !db.verifyPassword(password, user.passwordHash)) {
+      loginThrottle.recordFailure('marketplace', email);
       return reply.status(401).send({
         error: 'Unauthorized',
         message: 'Invalid email or password.',
       });
     }
+    loginThrottle.clear('marketplace', email);
 
     if (user.role !== 'CUSTOMER') {
       return reply.status(403).send({
@@ -284,7 +296,7 @@ export async function customerAuthRoutes(app: FastifyInstance) {
   });
 
   // Authenticated Customer Profile / Me
-  app.get('/api/v1/marketplace/auth/me', { preHandler: [authenticateToken] }, async (request: FastifyRequest) => {
+  app.get('/api/v1/marketplace/auth/me', { preHandler: [authenticateToken, requireShopperPortal] }, async (request: FastifyRequest) => {
     return {
       user: sanitizePublicUser(request.authUser!),
     };

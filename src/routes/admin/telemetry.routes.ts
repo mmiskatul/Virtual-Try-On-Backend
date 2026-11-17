@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyReply } from 'fastify';
+import { aiServiceHeaders } from '../../infrastructure/service_auth.js';
 import { createAdminMiddleware, registerScopedPreHandlers, requireRole } from '../../infrastructure/auth.guard.js';
 import { config } from '../../infrastructure/config.js';
 
@@ -10,7 +11,7 @@ export async function adminTelemetryRoutes(app: FastifyInstance) {
   // Query AI Infrastructure & Model Telemetry
   app.get('/api/v1/admin/ai/telemetry', { preHandler: adminGuards }, async (_request, reply: FastifyReply) => {
     try {
-      const response = await fetch(`${config.aiServiceUrl}/api/v1/metrics`);
+      const response = await fetch(`${config.aiServiceUrl}/api/v1/metrics`, { headers: aiServiceHeaders() });
       if (response.ok) {
         const data = await response.json();
         return data;
