@@ -17,7 +17,7 @@ interface Category {
 }
 
 const AUTH_SENSITIVE =
-  /\/auth\/(login|register|oauth-exchange|oauth-google|verify-email|resend-verification|forgot-password|verify-reset-token|reset-password|check-email|change-password)$/;
+  /\/auth\/(login|register|oauth-exchange|oauth-google|verify-email|resend-verification|forgot-password|verify-reset-token|reset-password|check-email|change-password|accept-invite)$/;
 const AUTH_REFRESH = /\/auth\/refresh$/;
 const TRYON_PUBLIC = /^\/api\/v1\/try-on\/(direct|submit|upload|upload-url|jobs)$/;
 

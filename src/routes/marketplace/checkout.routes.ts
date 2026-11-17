@@ -3,6 +3,7 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { resolveOptionalAuthUser } from '../../infrastructure/auth.guard.js';
 import { Order, OrderItem } from '../../domain/types.js';
+import { evaluateDiscount, recordDiscountUse } from '../../modules/commerce/discounts.js';
 
 interface CheckoutItemInput {
   productId: string;
@@ -12,12 +13,15 @@ interface CheckoutItemInput {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function validateCartItems(items: any[]): {
+function validateCartItems(items: any[], couponCode?: unknown): {
   ok: true;
   tenantId: string;
   brandName: string;
   subtotal: number;
   shippingFee: number;
+  discountAmount: number;
+  couponCode?: string;
+  discountId?: string;
   total: number;
   resolvedItems: OrderItem[];
 } | { ok: false; status: number; error: string; message: string } {
@@ -127,7 +131,20 @@ function validateCartItems(items: any[]): {
   }
 
   const shippingFee = subtotal >= 150 ? 0 : 15.0;
-  const total = Number((subtotal + shippingFee).toFixed(2));
+
+  let discountAmount = 0;
+  let appliedCode: string | undefined;
+  let discountId: string | undefined;
+  if (typeof couponCode === 'string' && couponCode.trim()) {
+    const check = evaluateDiscount(tenant, couponCode, subtotal);
+    if (!check.ok) {
+      return { ok: false, status: 400, error: check.error, message: check.message };
+    }
+    discountAmount = check.amount;
+    appliedCode = check.discount.code;
+    discountId = check.discount.id;
+  }
+  const total = Number((subtotal - discountAmount + shippingFee).toFixed(2));
 
   return {
     ok: true,
@@ -135,6 +152,9 @@ function validateCartItems(items: any[]): {
     brandName: tenant.name,
     subtotal,
     shippingFee,
+    discountAmount,
+    couponCode: appliedCode,
+    discountId,
     total,
     resolvedItems,
   };
@@ -143,8 +163,8 @@ function validateCartItems(items: any[]): {
 export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
   // Validate Checkout Basket (Enforces Single-Seller Policy)
   app.post('/api/v1/checkout/validate', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { items } = (request.body as { items: CheckoutItemInput[] }) || {};
-    const validation = validateCartItems(items);
+    const { items, couponCode } = (request.body as { items: CheckoutItemInput[]; couponCode?: string }) || {};
+    const validation = validateCartItems(items, couponCode);
 
     if (!validation.ok) {
       return reply.status(validation.status).send({
@@ -160,6 +180,8 @@ export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
       brandName: validation.brandName,
       subtotal: validation.subtotal,
       shippingFee: validation.shippingFee,
+      discountAmount: validation.discountAmount,
+      couponCode: validation.couponCode,
       total: validation.total,
       items: validation.resolvedItems,
     };
@@ -168,7 +190,7 @@ export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
   // Execute Checkout & Order Creation
   const handleCheckout = async (request: FastifyRequest, reply: FastifyReply) => {
     const body = (request.body as any) || {};
-    const { items, shippingAddress, customerEmail } = body;
+    const { items, shippingAddress, customerEmail, couponCode } = body;
 
     if (
       typeof customerEmail !== 'string' ||
@@ -187,7 +209,7 @@ export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
       });
     }
 
-    const validation = validateCartItems(items);
+    const validation = validateCartItems(items, couponCode);
     if (!validation.ok) {
       return reply.status(validation.status).send({
         error: validation.error,
@@ -225,6 +247,8 @@ export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
           subtotal: validation.subtotal,
           shippingFee: validation.shippingFee,
           totalAmount: validation.total,
+          discountAmount: validation.discountAmount || undefined,
+          couponCode: validation.couponCode,
           status: 'PROCESSING',
           paymentStatus: 'PAID',
           createdAt: now,
@@ -232,6 +256,7 @@ export async function marketplaceCheckoutRoutes(app: FastifyInstance) {
         };
 
         db.createOrder(newOrder);
+        if (validation.discountId) recordDiscountUse(validation.tenantId, validation.discountId);
         return newOrder;
       });
 

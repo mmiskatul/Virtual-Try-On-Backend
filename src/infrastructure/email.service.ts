@@ -414,6 +414,29 @@ class EmailService {
     });
   }
 
+  public async sendTeamInviteEmail(params: {
+    to: string;
+    inviterName: string;
+    brandName: string;
+    roleName: string;
+    inviteUrl: string;
+  }): Promise<EmailSendResult> {
+    const meta = getPortalMeta('brand');
+    const brand = escapeHtml(params.brandName);
+    const html = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; background: #0f172a; color: #e2e8f0; border-radius: 16px; padding: 32px; border: 1px solid #1e293b;">
+        <div style="font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: ${meta.accent}; font-weight: 700; margin-bottom: 12px;">${escapeHtml(meta.title)}</div>
+        <h1 style="font-size: 20px; color: #ffffff; margin: 0 0 12px;">You have been invited to join ${brand}</h1>
+        <p style="font-size: 14px; line-height: 1.6; color: #94a3b8; margin: 0 0 20px;">
+          ${escapeHtml(params.inviterName)} invited you to help run ${brand} as <strong style="color:#e2e8f0">${escapeHtml(params.roleName)}</strong>. This link works once and expires in 7 days.
+        </p>
+        <a href="${escapeHtml(params.inviteUrl)}" style="display:inline-block;background:${meta.accent};color:#0f172a;font-weight:700;text-decoration:none;padding:12px 20px;border-radius:12px;">Accept invitation</a>
+      </div>
+    `;
+    const text = `${params.inviterName} invited you to join ${params.brandName} as ${params.roleName}. Accept (valid 7 days): ${params.inviteUrl}`;
+    return this.dispatch({ to: params.to, subject: `Join ${params.brandName} on V-TRY`, html, text });
+  }
+
   public async sendPasswordChangedNotice(params: {
     to: string;
     name: string;

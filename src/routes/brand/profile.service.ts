@@ -37,6 +37,8 @@ type StorefrontTextField = Exclude<
   | 'categories'
   | 'overviewChecklistIds'
   | 'tryOn'
+  | 'discounts'
+  | 'teamInvites'
 >;
 
 const STOREFRONT_TEXT_FIELD_LIMITS: ReadonlyArray<[StorefrontTextField, number]> = [

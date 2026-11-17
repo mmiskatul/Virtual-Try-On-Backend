@@ -1,5 +1,15 @@
 export type TenantStatus = 'ACTIVE' | 'SUSPENDED' | 'PENDING_VERIFICATION';
-export type UserRole = 'SUPER_ADMIN' | 'BRAND_OWNER' | 'STORE_MANAGER' | 'CUSTOMER';
+export type UserRole =
+  | 'SUPER_ADMIN'
+  | 'BRAND_OWNER'
+  | 'BRAND_ADMIN'
+  | 'CATALOG_MANAGER'
+  | 'INVENTORY_MANAGER'
+  | 'ORDER_MANAGER'
+  | 'SUPPORT_AGENT'
+  | 'ANALYTICS_VIEWER'
+  | 'STORE_MANAGER'
+  | 'CUSTOMER';
 export type AuthPortal = 'marketplace' | 'brand' | 'admin';
 export type AuthTokenType = 'EMAIL_VERIFICATION' | 'PASSWORD_RESET';
 export type TryOnCategory = 'tops' | 'bottoms' | 'dresses' | 'outerwear' | 'all';
@@ -49,8 +59,39 @@ export interface TryOnSettings {
   };
 }
 
+/** A discount / coupon code a brand offers at checkout. Stored inside storefrontSettings. */
+export interface DiscountRecord {
+  id: string;
+  code: string; // always upper case
+  description?: string;
+  type: 'PERCENT' | 'FIXED';
+  value: number;
+  minOrder: number;
+  maxUses: number | null;
+  usedCount: number;
+  startsAt: number | null;
+  endsAt: number | null;
+  active: boolean;
+  createdAt: number;
+}
+
+/** A pending / past team invitation. Only a hash of the token is stored. */
+export interface TeamInviteRecord {
+  id: string;
+  email: string;
+  role: UserRole;
+  tokenHash: string;
+  invitedBy: string;
+  invitedAt: number;
+  expiresAt: number;
+  status: 'PENDING' | 'ACCEPTED' | 'REVOKED';
+  settledAt?: number;
+}
+
 export interface StorefrontSettings {
   tryOn?: TryOnSettings;
+  discounts?: DiscountRecord[];
+  teamInvites?: TeamInviteRecord[];
   primaryColor?: string;
   secondaryColor?: string;
   accentColor?: string;
@@ -222,6 +263,8 @@ export interface Order {
   subtotal: number;
   shippingFee: number;
   totalAmount: number;
+  discountAmount?: number; // not stored in the database: derivable as subtotal + shippingFee - totalAmount
+  couponCode?: string;
   status: OrderStatus;
   paymentStatus: PaymentStatus;
   createdAt: number;

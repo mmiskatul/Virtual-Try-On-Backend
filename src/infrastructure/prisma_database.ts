@@ -250,6 +250,7 @@ export class PrismaDatabase {
     if (updates.tenantId !== undefined) data.tenantId = updates.tenantId;
     if (updates.name !== undefined) data.name = updates.name;
     if (updates.passwordHash !== undefined) data.passwordHash = updates.passwordHash;
+    if (updates.role !== undefined) data.role = updates.role;
     if (updates.emailVerified !== undefined) data.emailVerified = updates.emailVerified;
     if (updates.emailVerifiedAt !== undefined) data.emailVerifiedAt = BigInt(updates.emailVerifiedAt);
     const result = await this.prisma.user.updateMany({
