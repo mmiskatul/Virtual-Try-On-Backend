@@ -22,6 +22,39 @@ if (fs.existsSync(envPath)) {
   }
 }
 
+/**
+ * Test safety: automated tests must never touch a real database. In test mode DATABASE_URL (from the
+ * environment or .env) is ignored and tests run in memory. A database is used only when TEST_DATABASE_URL is
+ * set explicitly, and only if it is local or its name contains "test".
+ */
+export function resolveDatabaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  if (env.NODE_ENV !== 'test') return env.DATABASE_URL || '';
+
+  const testUrl = (env.TEST_DATABASE_URL || '').trim();
+  if (!testUrl) return '';
+
+  let host = '';
+  let dbName = '';
+  try {
+    const parsed = new URL(testUrl);
+    host = parsed.hostname.toLowerCase();
+    dbName = decodeURIComponent(parsed.pathname.replace(/^\//, '')).toLowerCase();
+  } catch {
+    throw new Error('Refusing to run tests: TEST_DATABASE_URL is not a valid connection URL.');
+  }
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+  if (!isLocal && !dbName.includes('test')) {
+    throw new Error(
+      'Refusing to run tests against a non-test database. TEST_DATABASE_URL must point at localhost ' +
+        'or at a database whose name contains "test".',
+    );
+  }
+  if (env.DATABASE_URL && env.DATABASE_URL.trim() === testUrl) {
+    throw new Error('Refusing to run tests: TEST_DATABASE_URL must not be the same as DATABASE_URL.');
+  }
+  return testUrl;
+}
+
 export const config = {
   host: process.env.HOST || '0.0.0.0',
   port: Number(process.env.PORT || 4000),
@@ -71,7 +104,7 @@ export const config = {
   ),
 
   // Database (Supabase PostgreSQL / PostgreSQL)
-  databaseUrl: process.env.DATABASE_URL || '',
+  databaseUrl: resolveDatabaseUrl(),
 
   // Cloudinary Image Storage
   cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || '',

@@ -14,6 +14,7 @@
     "test:unit": "vitest run",
     "test:auth": "tsx test/auth.test.ts",
     "test:security": "tsx test/security.test.ts",
+    "test:dbguard": "tsx test/database_guard.test.ts",
     "test:prisma": "tsx test/prisma.test.ts",
     "test:quota": "tsx test/tenant_quota.test.ts",
     "test:signin": "tsx test/signin_signup.test.ts",
