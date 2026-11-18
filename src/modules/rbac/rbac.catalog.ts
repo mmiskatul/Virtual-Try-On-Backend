@@ -323,3 +323,20 @@ export function requirePermission(moduleName: string, action: string) {
   };
 }
 
+
+/** Like requirePermission, but passes when the caller holds any one of the listed "module:action" keys. */
+export function requireAnyPermission(...requiredKeys: string[]) {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    if (!request.authUser) {
+      return reply.status(401).send({ error: 'Unauthorized', message: 'Authentication required.' });
+    }
+    const roles = request.roleCodes || [request.authUser.role];
+    if (!requiredKeys.some((key) => hasPermission(roles, key, request.permissions))) {
+      return reply.status(403).send({
+        error: 'Forbidden',
+        message: `Missing one of the required permissions: ${requiredKeys.join(', ')}.`,
+        requiredPermission: requiredKeys,
+      });
+    }
+  };
+}
