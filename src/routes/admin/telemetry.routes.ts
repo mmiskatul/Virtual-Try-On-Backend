@@ -1,15 +1,16 @@
 import { FastifyInstance, FastifyReply } from 'fastify';
 import { aiServiceHeaders } from '../../infrastructure/service_auth.js';
-import { createAdminMiddleware, registerScopedPreHandlers, requireRole } from '../../infrastructure/auth.guard.js';
+import { createAdminMiddleware, registerScopedPreHandlers } from '../../infrastructure/auth.guard.js';
+import { requireAnyPermission, requirePermission } from '../../modules/rbac/rbac.catalog.js';
 import { config } from '../../infrastructure/config.js';
 
-const adminGuards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
+const adminGuards = createAdminMiddleware();
 
 export async function adminTelemetryRoutes(app: FastifyInstance) {
   registerScopedPreHandlers(app, adminGuards);
 
   // Query AI Infrastructure & Model Telemetry
-  app.get('/api/v1/admin/ai/telemetry', { preHandler: adminGuards }, async (_request, reply: FastifyReply) => {
+  app.get('/api/v1/admin/ai/telemetry', { preHandler: requirePermission('ai', 'read') }, async (_request, reply: FastifyReply) => {
     try {
       const response = await fetch(`${config.aiServiceUrl}/api/v1/metrics`, { headers: aiServiceHeaders() });
       if (response.ok) {

@@ -1,16 +1,17 @@
 import { FastifyInstance } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { createAdminMiddleware, registerScopedPreHandlers, requireRole } from '../../infrastructure/auth.guard.js';
+import { createAdminMiddleware, registerScopedPreHandlers } from '../../infrastructure/auth.guard.js';
 import { billingCreditService } from '../../modules/billing/billing.service.js';
 import { buildMonthlySeries } from '../../modules/admin/analytics_series.js';
+import { requireAnyPermission, requirePermission } from '../../modules/rbac/rbac.catalog.js';
 
-const adminGuards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
+const adminGuards = createAdminMiddleware();
 
 export async function adminAnalyticsRoutes(app: FastifyInstance) {
   registerScopedPreHandlers(app, adminGuards);
 
   // Global Platform Overview
-  app.get('/api/v1/admin/analytics/overview', { preHandler: adminGuards }, async () => {
+  app.get('/api/v1/admin/analytics/overview', { preHandler: requireAnyPermission('tenants:read', 'billing:read', 'ai:read') }, async () => {
     const tenants = db.getTenants();
     const products = db.getProducts();
     const orders = db.getOrders();
@@ -45,7 +46,7 @@ export async function adminAnalyticsRoutes(app: FastifyInstance) {
   });
 
   // Real monthly revenue (paid invoices) and try-on generations for the last N months, oldest first.
-  app.get('/api/v1/admin/analytics/series', { preHandler: adminGuards }, async (request) => {
+  app.get('/api/v1/admin/analytics/series', { preHandler: requireAnyPermission('billing:read', 'ai:read') }, async (request) => {
     const q = request.query as { months?: string };
     const points = buildMonthlySeries({
       invoices: await billingCreditService.listInvoicesDurable(),

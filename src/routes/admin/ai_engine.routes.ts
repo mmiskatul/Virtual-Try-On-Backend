@@ -5,19 +5,19 @@ import { db } from '../../infrastructure/database.js';
 import {
   createAdminMiddleware,
   registerScopedPreHandlers,
-  requireRole,
 } from '../../infrastructure/auth.guard.js';
 import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
+import { requireAnyPermission, requirePermission } from '../../modules/rbac/rbac.catalog.js';
 import { isMaskedPlaceholder, maskSecret, sanitizeEnvValue, updateEnvFile } from '../../infrastructure/env_manager.js';
 
-const adminGuards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
+const adminGuards = createAdminMiddleware();
 
 export async function adminAiEngineRoutes(app: FastifyInstance) {
   registerScopedPreHandlers(app, adminGuards);
   // 1. Fetch AI Engine Configuration & Model Registry Status (Never leak plaintext API keys)
   app.get(
     '/api/v1/admin/ai-engine/config',
-    { preHandler: adminGuards },
+    { preHandler: requirePermission('ai', 'manage') },
     async (_request: FastifyRequest, reply: FastifyReply) => {
       let aiServiceCapabilities: any = null;
       try {
@@ -79,7 +79,7 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
   // 2. Update AI Engine Configuration (Dynamic Live Reload + Safe .env Sync)
   app.post(
     '/api/v1/admin/ai-engine/config',
-    { preHandler: adminGuards },
+    { preHandler: requirePermission('ai', 'manage') },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const body = (request.body as any) || {};
       const {
@@ -181,7 +181,7 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
   // 3. Test API Key Connectivity Directly from Super Admin Dashboard
   app.post(
     '/api/v1/admin/ai-engine/test-key',
-    { preHandler: adminGuards },
+    { preHandler: requirePermission('ai', 'manage') },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { provider, apiKey } = (request.body as any) || {};
 

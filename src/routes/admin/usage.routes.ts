@@ -1,8 +1,9 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
-import { createAdminMiddleware, registerScopedPreHandlers, requireRole } from '../../infrastructure/auth.guard.js';
+import { createAdminMiddleware, registerScopedPreHandlers } from '../../infrastructure/auth.guard.js';
+import { requireAnyPermission, requirePermission } from '../../modules/rbac/rbac.catalog.js';
 
-const guards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
+const guards = createAdminMiddleware();
 const PLANS = ['STARTER', 'PRO', 'ENTERPRISE'];
 
 function limitParam(raw: unknown, fallback = 100): number {
@@ -14,7 +15,7 @@ export async function adminUsageRoutes(app: FastifyInstance) {
   registerScopedPreHandlers(app, guards);
 
   // Per-shop quota, usage and generation outcome summary
-  app.get('/api/v1/admin/usage', { preHandler: guards }, async () => {
+  app.get('/api/v1/admin/usage', { preHandler: requireAnyPermission('billing:read', 'ai:read', 'tenants:read') }, async () => {
     const jobs = db.getAllGenerations();
     const ledger = db.getAllUsageLedger();
     return db.getTenants().map(t => {
@@ -51,7 +52,7 @@ export async function adminUsageRoutes(app: FastifyInstance) {
   });
 
   // Recent generation jobs (never exposes the session access-token hash)
-  app.get('/api/v1/admin/generations', { preHandler: guards }, async (request: FastifyRequest) => {
+  app.get('/api/v1/admin/generations', { preHandler: requirePermission('ai', 'read') }, async (request: FastifyRequest) => {
     const q = request.query as any;
     const tenantId = typeof q.tenantId === 'string' ? q.tenantId : undefined;
     return db.getAllGenerations()
@@ -62,7 +63,7 @@ export async function adminUsageRoutes(app: FastifyInstance) {
   });
 
   // Usage ledger entries
-  app.get('/api/v1/admin/usage-ledger', { preHandler: guards }, async (request: FastifyRequest) => {
+  app.get('/api/v1/admin/usage-ledger', { preHandler: requireAnyPermission('billing:read', 'ai:read') }, async (request: FastifyRequest) => {
     const q = request.query as any;
     const tenantId = typeof q.tenantId === 'string' ? q.tenantId : undefined;
     return db.getAllUsageLedger()
@@ -72,7 +73,7 @@ export async function adminUsageRoutes(app: FastifyInstance) {
   });
 
   // Change a shop's plan / quota (audited)
-  app.patch('/api/v1/admin/tenants/:id/plan', { preHandler: guards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.patch('/api/v1/admin/tenants/:id/plan', { preHandler: requirePermission('billing', 'write') }, async (request: FastifyRequest, reply: FastifyReply) => {
     const { id } = request.params as { id: string };
     const body = (request.body as any) || {};
 
