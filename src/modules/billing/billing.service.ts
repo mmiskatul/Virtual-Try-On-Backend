@@ -4,6 +4,7 @@ import { getGlobalPrisma } from '../../infrastructure/prisma.js';
 import { logger } from '../../infrastructure/logger.js';
 import { SubscriptionPlan } from '../../domain/types.js';
 import { recordAudit } from '../audit/audit.service.js';
+import { isUniqueViolation, nextInvoiceNumber } from './invoice_number.js';
 
 export interface PlanEntitlementDto {
   featureKey: string;
@@ -607,10 +608,8 @@ export class BillingCreditService {
     const subtotal = input.billingInterval === 'ANNUAL' ? plan.annualPrice : plan.monthlyPrice;
     const taxAmount = Number((subtotal * 0.08).toFixed(2));
     const total = Number((subtotal + taxAmount).toFixed(2));
-    const invoice: InvoiceDto = {
-      id: crypto.randomUUID(),
+    const invoice = await this.issueInvoice({
       tenantId: input.tenantId,
-      invoiceNo: `INV-${new Date().getFullYear()}-${String(memoryInvoices.length + 1001)}`,
       period: new Date().toISOString().slice(0, 7),
       subtotal,
       taxAmount,
@@ -618,33 +617,16 @@ export class BillingCreditService {
       currency: plan.currency,
       status: 'PAID',
       dueDate: new Date(Date.now() + 7 * 86400 * 1000).toISOString(),
-      issuedAt: new Date().toISOString(),
-    };
-    memoryInvoices.unshift(invoice);
+    });
 
+    // Kept apart from the invoice insert so an invoice problem can never skip the plan update.
     const prisma = getGlobalPrisma();
-    if (prisma) {
+    if (prisma && updatedSub) {
       try {
-        await prisma.invoiceRecord.create({
-          data: {
-            id: invoice.id,
-            tenantId: invoice.tenantId,
-            invoiceNo: invoice.invoiceNo,
-            period: invoice.period,
-            subtotal: invoice.subtotal,
-            taxAmount: invoice.taxAmount,
-            total: invoice.total,
-            currency: invoice.currency,
-            status: invoice.status,
-            dueDate: new Date(invoice.dueDate),
-          },
+        await prisma.subscription.updateMany({
+          where: { tenantId: input.tenantId },
+          data: { planId: plan.id, billingInterval: input.billingInterval || 'MONTHLY' },
         });
-        if (updatedSub) {
-          await prisma.subscription.updateMany({
-            where: { tenantId: input.tenantId },
-            data: { planId: plan.id, billingInterval: input.billingInterval || 'MONTHLY' },
-          });
-        }
       } catch (err: any) {
         logger.warn({ err: err?.message }, 'billing.plan_change_prisma_warning');
       }
@@ -667,6 +649,61 @@ export class BillingCreditService {
       credits: await this.getCreditBalance(input.tenantId),
       invoice,
     };
+  }
+
+  /** Serialises invoice creation inside this process so two plan changes never pick the same number. */
+  private invoiceQueue: Promise<unknown> = Promise.resolve();
+
+  private issueInvoice(fields: Omit<InvoiceDto, 'id' | 'invoiceNo' | 'issuedAt'>): Promise<InvoiceDto> {
+    const run = this.invoiceQueue.then(() => this.issueInvoiceLocked(fields));
+    this.invoiceQueue = run.catch(() => undefined);
+    return run;
+  }
+
+  /**
+   * The number is one above the highest already used (database and memory), so it keeps counting after a restart.
+   * The database's unique invoice_no is the final guard across several backend instances: on a clash we re-read and
+   * try the next number. A database error other than a clash keeps the invoice in memory, as before.
+   */
+  private async issueInvoiceLocked(fields: Omit<InvoiceDto, 'id' | 'invoiceNo' | 'issuedAt'>): Promise<InvoiceDto> {
+    const prisma = getGlobalPrisma();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const known = (await this.listInvoicesDurable()).map((i) => i.invoiceNo);
+      const invoice: InvoiceDto = {
+        ...fields,
+        id: crypto.randomUUID(),
+        invoiceNo: nextInvoiceNumber(known, new Date().getUTCFullYear()),
+        issuedAt: new Date().toISOString(),
+      };
+      if (prisma) {
+        try {
+          await prisma.invoiceRecord.create({
+            data: {
+              id: invoice.id,
+              tenantId: invoice.tenantId,
+              invoiceNo: invoice.invoiceNo,
+              period: invoice.period,
+              subtotal: invoice.subtotal,
+              taxAmount: invoice.taxAmount,
+              total: invoice.total,
+              currency: invoice.currency,
+              status: invoice.status,
+              dueDate: new Date(invoice.dueDate),
+              issuedAt: new Date(invoice.issuedAt),
+            },
+          });
+        } catch (err: any) {
+          if (isUniqueViolation(err)) {
+            logger.warn({ invoiceNo: invoice.invoiceNo }, 'billing.invoice_number_taken_retrying');
+            continue;
+          }
+          logger.warn({ err: err?.message }, 'billing.invoice_prisma_warning');
+        }
+      }
+      memoryInvoices.unshift(invoice);
+      return invoice;
+    }
+    throw new Error('Could not allocate a unique invoice number');
   }
 
   public getLedger(tenantId?: string): CreditLedgerDto[] {
