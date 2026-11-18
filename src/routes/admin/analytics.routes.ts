@@ -1,6 +1,8 @@
 import { FastifyInstance } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { createAdminMiddleware, registerScopedPreHandlers, requireRole } from '../../infrastructure/auth.guard.js';
+import { billingCreditService } from '../../modules/billing/billing.service.js';
+import { buildMonthlySeries } from '../../modules/admin/analytics_series.js';
 
 const adminGuards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
 
@@ -36,11 +38,20 @@ export async function adminAnalyticsRoutes(app: FastifyInstance) {
         gmv: Number(gmv.toFixed(2))
       },
       aiTelemetry: {
-        totalTryOnInvocations: 436,
-        avgInferenceLatencySec: 1.45,
-        modelReady: true,
-        gpuAllocated: 'Tesla T4 / RTX 4090 Dedicated'
+        // Real count of generation jobs. Latency and GPU details are not measured by this service, so they are not reported.
+        totalTryOnInvocations: db.getAllGenerations().length
       }
     };
+  });
+
+  // Real monthly revenue (paid invoices) and try-on generations for the last N months, oldest first.
+  app.get('/api/v1/admin/analytics/series', { preHandler: adminGuards }, async (request) => {
+    const q = request.query as { months?: string };
+    const points = buildMonthlySeries({
+      invoices: await billingCreditService.listInvoicesDurable(),
+      generations: db.getAllGenerations(),
+      months: Number(q.months) || 6,
+    });
+    return { success: true, data: { points } };
   });
 }

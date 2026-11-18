@@ -676,6 +676,39 @@ export class BillingCreditService {
   public getInvoices(tenantId?: string): InvoiceDto[] {
     return tenantId ? memoryInvoices.filter((i) => i.tenantId === tenantId) : memoryInvoices;
   }
+
+  /**
+   * Invoices that survive a restart: the database rows plus any in-memory ones not stored yet, newest first,
+   * de-duplicated by invoice number. Falls back to memory alone when no database is connected.
+   */
+  public async listInvoicesDurable(): Promise<InvoiceDto[]> {
+    const merged = new Map<string, InvoiceDto>();
+    const prisma = getGlobalPrisma();
+    if (prisma) {
+      try {
+        const rows = await prisma.invoiceRecord.findMany({ orderBy: { issuedAt: 'desc' } });
+        for (const r of rows) {
+          merged.set(r.invoiceNo, {
+            id: r.id,
+            tenantId: r.tenantId,
+            invoiceNo: r.invoiceNo,
+            period: r.period,
+            subtotal: Number(r.subtotal),
+            taxAmount: Number(r.taxAmount),
+            total: Number(r.total),
+            currency: r.currency,
+            status: (r.status as InvoiceDto['status']) || 'OPEN',
+            dueDate: r.dueDate.toISOString(),
+            issuedAt: r.issuedAt.toISOString(),
+          });
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'billing.list_invoices_prisma_warning');
+      }
+    }
+    for (const inv of memoryInvoices) if (!merged.has(inv.invoiceNo)) merged.set(inv.invoiceNo, inv);
+    return Array.from(merged.values()).sort((a, b) => b.issuedAt.localeCompare(a.issuedAt));
+  }
 }
 
 export const billingCreditService = new BillingCreditService();

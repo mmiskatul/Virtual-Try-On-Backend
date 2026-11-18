@@ -701,9 +701,10 @@ export class AdminControlPlaneService {
   }
 
   public async getFullSnapshot() {
-    const [users, plans, moderationProducts, redisHealth, storageHealth] = await Promise.all([
+    const [users, plans, invoices, moderationProducts, redisHealth, storageHealth] = await Promise.all([
       this.listUsers(),
       billingCreditService.listPlans(true),
+      billingCreditService.listInvoicesDurable(),
       this.listModerationQueue(),
       redisAdapter.health(),
       storageAdapter.health(),
@@ -719,7 +720,7 @@ export class AdminControlPlaneService {
       })),
       orders: db.getOrders(),
       refunds: this.listRefunds(),
-      invoices: billingCreditService.getInvoices(),
+      invoices,
       creditLedger: billingCreditService.getLedger().slice(0, 100),
       aiModels: memoryAiModels,
       aiRouting: aiRoutingPolicy,
