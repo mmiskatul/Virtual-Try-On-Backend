@@ -5,7 +5,6 @@ import { emailService } from '../../infrastructure/email.service.js';
 import {
   createAdminMiddleware,
   registerScopedPreHandlers,
-  requireRole,
 } from '../../infrastructure/auth.guard.js';
 import { PrismaDatabase } from '../../infrastructure/prisma_database.js';
 import { NeonSqlDatabase } from '../../infrastructure/neon_database.js';
@@ -16,8 +15,11 @@ import {
   sanitizeEnvValue,
   updateEnvFile,
 } from '../../infrastructure/env_manager.js';
+import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
 
-const adminGuards = createAdminMiddleware(requireRole('SUPER_ADMIN'));
+const adminGuards = createAdminMiddleware();
+/** Database, email and secret settings: only holders of the full-access "*:*" permission (Super Admin). */
+const superOnly = requirePermission('*', '*');
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function extractHost(uri: string): string {
@@ -43,7 +45,7 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
   registerScopedPreHandlers(app, adminGuards);
 
   // 1. Read Masked Resend Email + Supabase / Database Configuration
-  app.get('/api/v1/admin/infrastructure/config', { preHandler: adminGuards }, async () => {
+  app.get('/api/v1/admin/infrastructure/config', { preHandler: superOnly }, async () => {
     const prisma = db.getPrisma();
     const counts = prisma && prisma.isConnected() ? await prisma.getTableCounts().catch(() => null) : null;
     const health = prisma && prisma.isConnected() ? await prisma.checkHealth().catch(() => null) : null;
@@ -76,7 +78,7 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
   });
 
   // 2. Save & Live-Reload Resend Configuration
-  app.post('/api/v1/admin/infrastructure/resend', { preHandler: adminGuards }, async (request: FastifyRequest) => {
+  app.post('/api/v1/admin/infrastructure/resend', { preHandler: superOnly }, async (request: FastifyRequest) => {
     const body = (request.body as any) || {};
     const envUpdates: Record<string, string> = {};
 
@@ -120,7 +122,7 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
   });
 
   // 3. Verify Resend API Key OR Send Real Test Email
-  app.post('/api/v1/admin/infrastructure/resend/test', { preHandler: adminGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/admin/infrastructure/resend/test', { preHandler: superOnly }, async (request: FastifyRequest, reply: FastifyReply) => {
     const body = (request.body as any) || {};
     const action = body.action === 'send' ? 'send' : 'verify';
     const override = {
@@ -148,7 +150,7 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
   });
 
   // 4. Test Supabase / PostgreSQL Connection (Non-destructive)
-  app.post('/api/v1/admin/infrastructure/database/test', { preHandler: adminGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/admin/infrastructure/database/test', { preHandler: superOnly }, async (request: FastifyRequest, reply: FastifyReply) => {
     const body = (request.body as any) || {};
     const candidateDbUrl =
       typeof body.databaseUrl === 'string' && body.databaseUrl.trim() && !isMaskedPlaceholder(body.databaseUrl)
@@ -202,7 +204,7 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
   });
 
   // 5. Save Supabase / PostgreSQL Configuration & Reconnect Live
-  app.post('/api/v1/admin/infrastructure/database', { preHandler: adminGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/admin/infrastructure/database', { preHandler: superOnly }, async (request: FastifyRequest, reply: FastifyReply) => {
     const body = (request.body as any) || {};
     const envUpdates: Record<string, string> = {};
 
@@ -252,7 +254,7 @@ export async function adminInfrastructureRoutes(app: FastifyInstance) {
   });
 
   // 6. Sync Local Snapshot / Demo Data into Connected Supabase / PostgreSQL Database
-  app.post('/api/v1/admin/infrastructure/database/sync', { preHandler: adminGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
+  app.post('/api/v1/admin/infrastructure/database/sync', { preHandler: superOnly }, async (request: FastifyRequest, reply: FastifyReply) => {
     try {
       const result = await db.syncSnapshotToDatabase();
       db.recordAuditLog({
