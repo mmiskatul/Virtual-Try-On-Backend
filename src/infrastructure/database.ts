@@ -1090,7 +1090,7 @@ export class Database {
 
   public updateSubscription(
     tenantId: string,
-    updates: Partial<Pick<Subscription, 'plan' | 'productLimit' | 'tryOnMonthlyQuota' | 'status'>>
+    updates: Partial<Pick<Subscription, 'plan' | 'productLimit' | 'tryOnMonthlyQuota' | 'status' | 'trialEndsAt'>>
   ): Subscription | undefined {
     const sub = this.data.subscriptions.find(s => s.tenantId === tenantId);
     if (!sub) return undefined;

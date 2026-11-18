@@ -9,6 +9,7 @@ import { recordAudit } from '../audit/audit.service.js';
 import { revokeAllUserSessions } from '../auth/jwt.verifier.js';
 import { billingCreditService } from '../billing/billing.service.js';
 import { catalogRepository } from '../catalog/catalog.repository.js';
+import { hasPermission } from '../rbac/rbac.catalog.js';
 
 export interface CmsContentDto {
   id: string;
@@ -40,7 +41,7 @@ export interface SupportTicketDto {
   subject: string;
   category: string;
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  status: 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
+  status: 'OPEN' | 'ASSIGNED' | 'IN_PROGRESS' | 'WAITING_CUSTOMER' | 'ESCALATED' | 'RESOLVED' | 'CLOSED';
   assignedAgent?: string;
   relatedJobId?: string;
   messages: Array<{ id: string; sender: string; senderRole: string; body: string; internal: boolean; createdAt: string }>;
@@ -194,6 +195,45 @@ let platformSettings: Record<string, unknown> = {
   requireModerationBeforeMarketplace: false,
   defaultRetentionDays: 30,
 };
+
+/**
+ * Which permission unlocks each section of the control-plane snapshot. A caller receives only the sections they may
+ * read; a section missing from this map is never sent (so a new section is private until it is listed here).
+ * Each entry is "any of".
+ */
+const SNAPSHOT_SECTION_PERMISSIONS: Record<string, string[]> = {
+  users: ['users:read'],
+  plans: ['plans:read', 'billing:read'],
+  subscriptions: ['plans:read', 'billing:read'],
+  orders: ['billing:read'],
+  refunds: ['billing:read'],
+  invoices: ['billing:read'],
+  creditLedger: ['billing:read'],
+  aiModels: ['ai:read'],
+  aiRouting: ['ai:read'],
+  moderationProducts: ['moderation:read'],
+  cmsPages: ['cms:manage'],
+  tickets: ['support:read'],
+  featureFlags: ['security:manage'],
+  webhooks: ['security:manage'],
+  governanceRequests: ['security:manage'],
+  settings: ['security:manage'],
+  infrastructureHealth: ['security:manage'],
+};
+
+/** Returns the snapshot with every section the caller is not allowed to read removed. */
+export function filterSnapshotByPermissions<T extends Record<string, unknown>>(
+  snapshot: T,
+  roleCodes: string[],
+  permissions?: Set<string>
+): Partial<T> {
+  const out: Record<string, unknown> = {};
+  for (const [section, value] of Object.entries(snapshot)) {
+    const needs = SNAPSHOT_SECTION_PERMISSIONS[section];
+    if (needs && needs.some((key) => hasPermission(roleCodes, key, permissions))) out[section] = value;
+  }
+  return out as Partial<T>;
+}
 
 export class AdminControlPlaneService {
   public async listUsers() {
@@ -563,13 +603,20 @@ export class AdminControlPlaneService {
 
   public async replyOrUpdateTicket(
     ticketId: string,
-    patch: { status?: SupportTicketDto['status']; assignedAgent?: string; message?: string; internal?: boolean },
+    patch: {
+      status?: SupportTicketDto['status'];
+      priority?: SupportTicketDto['priority'];
+      assignedAgent?: string;
+      message?: string;
+      internal?: boolean;
+    },
     actorName: string,
     actorRole: string
   ) {
     const t = memoryTickets.get(ticketId);
     if (!t) return null;
     if (patch.status) t.status = patch.status;
+    if (patch.priority) t.priority = patch.priority;
     if (patch.assignedAgent !== undefined) t.assignedAgent = patch.assignedAgent;
     if (patch.message) {
       t.messages.push({
@@ -585,8 +632,185 @@ export class AdminControlPlaneService {
     return t;
   }
 
+  /** Cancels a tenant's subscription. Already-cancelled subscriptions are a conflict, not a silent no-op. */
+  public async cancelSubscription(input: {
+    tenantId: string;
+    reason: string;
+    actorId: string;
+    actorRole: string;
+    correlationId?: string;
+  }) {
+    const sub = db.getSubscription(input.tenantId);
+    if (!sub) return { ok: false as const, error: 'NotFound', message: 'Subscription not found.' };
+    if (sub.status === 'CANCELLED') {
+      return { ok: false as const, error: 'Conflict', message: 'Subscription is already cancelled.' };
+    }
+    const previous = sub.status;
+    const updated = db.updateSubscription(input.tenantId, { status: 'CANCELLED', trialEndsAt: undefined });
+    await recordAudit({
+      actorId: input.actorId,
+      actorRole: input.actorRole,
+      tenantId: input.tenantId,
+      action: 'ADMIN_SUBSCRIPTION_CANCELLED',
+      entity: 'Subscription',
+      entityId: input.tenantId,
+      reason: input.reason,
+      correlationId: input.correlationId,
+      details: { previousStatus: previous },
+    });
+    return { ok: true as const, subscription: updated! };
+  }
+
+  /** Starts or extends a free trial by `days`, counted from the later of now and the current trial end. */
+  public async extendTrial(input: {
+    tenantId: string;
+    days: number;
+    actorId: string;
+    actorRole: string;
+    correlationId?: string;
+  }) {
+    const sub = db.getSubscription(input.tenantId);
+    if (!sub) return { ok: false as const, error: 'NotFound', message: 'Subscription not found.' };
+    if (sub.status === 'CANCELLED') {
+      return { ok: false as const, error: 'Conflict', message: 'A cancelled subscription cannot be put on trial.' };
+    }
+    const base = Math.max(Date.now(), sub.status === 'TRIALING' ? sub.trialEndsAt ?? 0 : 0);
+    const trialEndsAt = base + input.days * 86_400_000;
+    const updated = db.updateSubscription(input.tenantId, { status: 'TRIALING', trialEndsAt });
+    await recordAudit({
+      actorId: input.actorId,
+      actorRole: input.actorRole,
+      tenantId: input.tenantId,
+      action: 'ADMIN_TRIAL_EXTENDED',
+      entity: 'Subscription',
+      entityId: input.tenantId,
+      correlationId: input.correlationId,
+      details: { days: input.days, trialEndsAt: new Date(trialEndsAt).toISOString() },
+    });
+    return { ok: true as const, subscription: updated! };
+  }
+
+  // --- Tenant internal notes & support-agent assignment ------------------------------------------------------
+  // Stored as audit-log entries (immutable, attributed, durable wherever audit logs are durable) instead of a
+  // new table. The latest ADMIN_SUPPORT_AGENT_ASSIGNED entry is the current assignee.
+
+  public async addTenantNote(input: {
+    tenantId: string;
+    note: string;
+    actorId: string;
+    actorName: string;
+    actorRole: string;
+    correlationId?: string;
+  }) {
+    await recordAudit({
+      actorId: input.actorId,
+      actorRole: input.actorRole,
+      tenantId: input.tenantId,
+      action: 'ADMIN_TENANT_NOTE_ADDED',
+      entity: 'Tenant',
+      entityId: input.tenantId,
+      correlationId: input.correlationId,
+      details: { note: input.note, authorName: input.actorName },
+    });
+  }
+
+  public async assignSupportAgent(input: {
+    tenantId: string;
+    agentId: string;
+    agentName: string;
+    actorId: string;
+    actorRole: string;
+    correlationId?: string;
+  }) {
+    await recordAudit({
+      actorId: input.actorId,
+      actorRole: input.actorRole,
+      tenantId: input.tenantId,
+      action: 'ADMIN_SUPPORT_AGENT_ASSIGNED',
+      entity: 'Tenant',
+      entityId: input.tenantId,
+      correlationId: input.correlationId,
+      details: { agentId: input.agentId, agentName: input.agentName },
+    });
+  }
+
+  /** Newest first. Reads the durable audit table when a database is connected, else the in-process log. */
+  public async getTenantAdminContext(tenantId: string) {
+    const ACTIONS = ['ADMIN_TENANT_NOTE_ADDED', 'ADMIN_SUPPORT_AGENT_ASSIGNED'];
+    type Row = { action: string; actorId: string; details: Record<string, any>; timestamp: number };
+    let rows: Row[] = [];
+
+    const prisma = getGlobalPrisma();
+    if (prisma) {
+      try {
+        const found = await prisma.auditLog.findMany({
+          where: { tenantId, action: { in: ACTIONS } },
+          orderBy: { timestamp: 'desc' },
+          take: 200,
+        });
+        rows = found.map((r: any) => ({
+          action: r.action,
+          actorId: r.actorId,
+          details: (r.details as Record<string, any>) || {},
+          timestamp: Number(r.timestamp),
+        }));
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, 'admin.tenant_context_prisma_warning');
+      }
+    }
+    if (rows.length === 0) {
+      rows = db
+        .getAuditLogs(tenantId)
+        .filter((a) => ACTIONS.includes(a.action))
+        .map((a) => ({ action: a.action, actorId: a.actorId, details: a.details || {}, timestamp: a.timestamp }));
+    }
+
+    const notes = rows
+      .filter((r) => r.action === 'ADMIN_TENANT_NOTE_ADDED')
+      .map((r) => ({
+        id: `${r.timestamp}_${r.actorId}`,
+        note: String(r.details.note ?? ''),
+        author: String(r.details.authorName ?? db.getUserById(r.actorId)?.email ?? r.actorId),
+        createdAt: new Date(r.timestamp).toISOString(),
+      }));
+    const assigned = rows.find((r) => r.action === 'ADMIN_SUPPORT_AGENT_ASSIGNED');
+    return {
+      notes,
+      assignedSupportAgent: assigned
+        ? { id: String(assigned.details.agentId ?? ''), name: String(assigned.details.agentName ?? '') }
+        : null,
+    };
+  }
+
   public listRefunds() {
     return Array.from(memoryRefunds.values());
+  }
+
+  /** Moves a refund through its lifecycle (PENDING -> APPROVED -> PROCESSED, or REJECTED). Settled refunds are final. */
+  public async updateRefundStatus(
+    refundId: string,
+    status: 'APPROVED' | 'REJECTED' | 'PROCESSED',
+    actorId: string,
+    actorRole: string,
+    note?: string
+  ) {
+    const row = memoryRefunds.get(refundId);
+    if (!row) return { ok: false as const, error: 'NotFound', message: 'Refund not found.' };
+    if (row.status === 'PROCESSED' || row.status === 'REJECTED') {
+      return { ok: false as const, error: 'Conflict', message: `Refund is already ${row.status} and cannot change.` };
+    }
+    row.status = status;
+    await recordAudit({
+      actorId,
+      actorRole,
+      tenantId: row.tenantId,
+      action: `FINANCE_REFUND_${status}`,
+      entity: 'RefundRecord',
+      entityId: row.id,
+      reason: note,
+      details: { orderId: row.orderId, amount: row.amount },
+    });
+    return { ok: true as const, refund: row };
   }
 
   public async createRefund(

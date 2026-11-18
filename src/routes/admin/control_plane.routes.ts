@@ -8,7 +8,7 @@ import {
 } from '../../infrastructure/auth.guard.js';
 import { okResponse } from '../../infrastructure/http.js';
 import { PLATFORM_ADMIN_ROLE_CODES, requirePermission } from '../../modules/rbac/rbac.catalog.js';
-import { adminControlPlaneService } from '../../modules/admin/control_plane.service.js';
+import { adminControlPlaneService, filterSnapshotByPermissions } from '../../modules/admin/control_plane.service.js';
 import { billingCreditService } from '../../modules/billing/billing.service.js';
 
 const CreateTenantSchema = z.object({
@@ -57,16 +57,53 @@ const WebhookCreateSchema = z.object({
   tenantId: z.string().optional(),
 });
 
+const CancelSubscriptionSchema = z.object({
+  reason: z.string().trim().min(4).max(400),
+});
+
+const ExtendTrialSchema = z.object({
+  days: z.number().int().min(1).max(90).default(14),
+});
+
+const TenantNoteSchema = z.object({
+  note: z.string().trim().min(1).max(2000),
+});
+
+const AssignAgentSchema = z.object({
+  agentId: z.string().min(1),
+});
+
+const RefundStatusSchema = z.object({
+  status: z.enum(['APPROVED', 'REJECTED', 'PROCESSED']),
+  note: z.string().max(400).optional(),
+});
+
+const TicketPatchSchema = z
+  .object({
+    status: z.enum(['OPEN', 'ASSIGNED', 'IN_PROGRESS', 'WAITING_CUSTOMER', 'ESCALATED', 'RESOLVED', 'CLOSED']).optional(),
+    priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+    assignedAgent: z.string().max(120).optional(),
+    message: z.string().min(1).max(4000).optional(),
+    internal: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, 'Provide at least one field to update.');
+
+const GovernanceStatusSchema = z.object({
+  status: z.enum(['PENDING_REVIEW', 'IN_PROGRESS', 'COMPLETED', 'REJECTED']),
+});
+
 export async function adminControlPlaneRoutes(app: FastifyInstance) {
   registerScopedPreHandlers(app, [authenticateToken, requirePortalRole('admin')]);
 
   // Unified Super Admin Control Plane Hydration Snapshot
   app.get(
     '/api/v1/admin/control-plane/snapshot',
-    { preHandler: [authenticateToken, requirePermission('tenants', 'read')] },
+    // Any signed-in platform admin may call this; each section is included only if their role can read it.
+    { preHandler: [authenticateToken] },
     async (request: FastifyRequest) => {
       const snapshot = await adminControlPlaneService.getFullSnapshot();
-      return okResponse(snapshot, request.correlationId);
+      const roles = request.roleCodes || [request.authUser!.role];
+      return okResponse(filterSnapshotByPermissions(snapshot, roles, request.permissions), request.correlationId);
     }
   );
 
@@ -89,6 +126,108 @@ export async function adminControlPlaneRoutes(app: FastifyInstance) {
         return reply.status(409).send({ error: res.error, message: res.message });
       }
       return reply.status(201).send(okResponse(res, request.correlationId));
+    }
+  );
+
+  // Subscription lifecycle
+  app.post(
+    '/api/v1/admin/subscriptions/:tenantId/cancel',
+    { preHandler: [authenticateToken, requirePermission('billing', 'write')] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { tenantId } = request.params as { tenantId: string };
+      const parsed = CancelSubscriptionSchema.safeParse(request.body || {});
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'ValidationError', message: parsed.error.issues.map((i) => i.message).join('; ') });
+      }
+      const res = await adminControlPlaneService.cancelSubscription({
+        tenantId,
+        reason: parsed.data.reason,
+        actorId: request.authUser!.id,
+        actorRole: request.authUser!.role,
+        correlationId: request.correlationId,
+      });
+      if (!res.ok) return reply.status(res.error === 'NotFound' ? 404 : 409).send({ error: res.error, message: res.message });
+      return okResponse({ subscription: res.subscription }, request.correlationId);
+    }
+  );
+
+  app.post(
+    '/api/v1/admin/subscriptions/:tenantId/extend-trial',
+    { preHandler: [authenticateToken, requirePermission('billing', 'write')] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { tenantId } = request.params as { tenantId: string };
+      const parsed = ExtendTrialSchema.safeParse(request.body || {});
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'ValidationError', message: parsed.error.issues.map((i) => i.message).join('; ') });
+      }
+      const res = await adminControlPlaneService.extendTrial({
+        tenantId,
+        days: parsed.data.days,
+        actorId: request.authUser!.id,
+        actorRole: request.authUser!.role,
+        correlationId: request.correlationId,
+      });
+      if (!res.ok) return reply.status(res.error === 'NotFound' ? 404 : 409).send({ error: res.error, message: res.message });
+      return okResponse({ subscription: res.subscription }, request.correlationId);
+    }
+  );
+
+  // Tenant internal notes & support-agent assignment
+  app.get(
+    '/api/v1/admin/tenants/:id/admin-context',
+    { preHandler: [authenticateToken, requirePermission('tenants', 'read')] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = request.params as { id: string };
+      if (!db.getTenantById(id)) return reply.status(404).send({ error: 'NotFound', message: 'Tenant not found.' });
+      return okResponse(await adminControlPlaneService.getTenantAdminContext(id), request.correlationId);
+    }
+  );
+
+  app.post(
+    '/api/v1/admin/tenants/:id/notes',
+    { preHandler: [authenticateToken, requirePermission('tenants', 'write')] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = request.params as { id: string };
+      const parsed = TenantNoteSchema.safeParse(request.body || {});
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'ValidationError', message: parsed.error.issues.map((i) => i.message).join('; ') });
+      }
+      if (!db.getTenantById(id)) return reply.status(404).send({ error: 'NotFound', message: 'Tenant not found.' });
+      await adminControlPlaneService.addTenantNote({
+        tenantId: id,
+        note: parsed.data.note,
+        actorId: request.authUser!.id,
+        actorName: request.authUser!.name,
+        actorRole: request.authUser!.role,
+        correlationId: request.correlationId,
+      });
+      return reply.status(201).send(okResponse(await adminControlPlaneService.getTenantAdminContext(id), request.correlationId));
+    }
+  );
+
+  app.put(
+    '/api/v1/admin/tenants/:id/support-agent',
+    { preHandler: [authenticateToken, requirePermission('tenants', 'write')] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = request.params as { id: string };
+      const parsed = AssignAgentSchema.safeParse(request.body || {});
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'ValidationError', message: parsed.error.issues.map((i) => i.message).join('; ') });
+      }
+      if (!db.getTenantById(id)) return reply.status(404).send({ error: 'NotFound', message: 'Tenant not found.' });
+      const agent = db.getUserById(parsed.data.agentId);
+      if (!agent || !PLATFORM_ADMIN_ROLE_CODES.has(agent.role)) {
+        return reply.status(400).send({ error: 'ValidationError', message: 'The support agent must be a platform staff member.' });
+      }
+      await adminControlPlaneService.assignSupportAgent({
+        tenantId: id,
+        agentId: agent.id,
+        agentName: agent.name || agent.email,
+        actorId: request.authUser!.id,
+        actorRole: request.authUser!.role,
+        correlationId: request.correlationId,
+      });
+      return okResponse(await adminControlPlaneService.getTenantAdminContext(id), request.correlationId);
     }
   );
 
@@ -163,6 +302,29 @@ export async function adminControlPlaneRoutes(app: FastifyInstance) {
       }
       const refund = await adminControlPlaneService.createRefund(parsed.data, request.authUser!.id, request.authUser!.role);
       return reply.status(201).send(okResponse({ refund }, request.correlationId));
+    }
+  );
+
+  app.patch(
+    '/api/v1/admin/finance/refunds/:id',
+    { preHandler: [authenticateToken, requirePermission('billing', 'refund')] },
+    async (request: FastifyRequest, reply: FastifyReply) => {
+      const { id } = request.params as { id: string };
+      const parsed = RefundStatusSchema.safeParse(request.body || {});
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'ValidationError', message: parsed.error.issues.map((i) => i.message).join('; ') });
+      }
+      const res = await adminControlPlaneService.updateRefundStatus(
+        id,
+        parsed.data.status,
+        request.authUser!.id,
+        request.authUser!.role,
+        parsed.data.note
+      );
+      if (!res.ok) {
+        return reply.status(res.error === 'NotFound' ? 404 : 409).send({ error: res.error, message: res.message });
+      }
+      return okResponse({ refund: res.refund }, request.correlationId);
     }
   );
 
@@ -267,10 +429,13 @@ export async function adminControlPlaneRoutes(app: FastifyInstance) {
     { preHandler: [authenticateToken, requirePermission('support', 'manage')] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = request.params as { id: string };
-      const body = (request.body as any) || {};
+      const parsed = TicketPatchSchema.safeParse(request.body || {});
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'ValidationError', message: parsed.error.issues.map((i) => i.message).join('; ') });
+      }
       const updated = await adminControlPlaneService.replyOrUpdateTicket(
         id,
-        body,
+        parsed.data,
         request.authUser!.name,
         request.authUser!.role
       );
@@ -339,10 +504,13 @@ export async function adminControlPlaneRoutes(app: FastifyInstance) {
     { preHandler: [authenticateToken, requirePermission('security', 'manage')] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = request.params as { id: string };
-      const { status } = (request.body as any) || {};
+      const parsed = GovernanceStatusSchema.safeParse(request.body || {});
+      if (!parsed.success) {
+        return reply.status(400).send({ error: 'ValidationError', message: parsed.error.issues.map((i) => i.message).join('; ') });
+      }
       const updated = await adminControlPlaneService.updateGovernanceRequest(
         id,
-        status,
+        parsed.data.status,
         request.authUser!.id,
         request.authUser!.role
       );

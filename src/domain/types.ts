@@ -314,7 +314,9 @@ export interface Subscription {
   productLimit: number;
   tryOnMonthlyQuota: number;
   tryOnUsed: number;
-  status: 'ACTIVE' | 'PAST_DUE' | 'CANCELLED';
+  status: 'ACTIVE' | 'TRIALING' | 'PAST_DUE' | 'CANCELLED';
+  /** Epoch ms when a trial ends. Only meaningful while status is TRIALING. */
+  trialEndsAt?: number;
   updatedAt: number;
 }
 

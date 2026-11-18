@@ -759,6 +759,7 @@ export class PrismaDatabase {
           tryOnMonthlyQuota: s.tryOnMonthlyQuota,
           tryOnUsed: s.tryOnUsed,
           status: s.status,
+          trialEndsAt: s.trialEndsAt ? new Date(s.trialEndsAt) : null,
           updatedAt: BigInt(s.updatedAt),
         },
         create: {
@@ -769,6 +770,7 @@ export class PrismaDatabase {
           tryOnMonthlyQuota: s.tryOnMonthlyQuota,
           tryOnUsed: s.tryOnUsed,
           status: s.status,
+          trialEndsAt: s.trialEndsAt ? new Date(s.trialEndsAt) : null,
           updatedAt: BigInt(s.updatedAt),
         },
       });
@@ -850,6 +852,7 @@ export class PrismaDatabase {
         productLimit: sub.productLimit,
         tryOnMonthlyQuota: sub.tryOnMonthlyQuota,
         status: sub.status,
+        trialEndsAt: sub.trialEndsAt ? new Date(sub.trialEndsAt) : null,
         updatedAt: BigInt(sub.updatedAt),
       },
     });
@@ -1172,6 +1175,7 @@ export class PrismaDatabase {
       tryOnMonthlyQuota: row.tryOnMonthlyQuota,
       tryOnUsed: row.tryOnUsed,
       status: row.status as any,
+      ...(row.trialEndsAt ? { trialEndsAt: new Date(row.trialEndsAt).getTime() } : {}),
       updatedAt: Number(row.updatedAt),
     };
   }
