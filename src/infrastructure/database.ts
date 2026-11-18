@@ -1,6 +1,7 @@
 import { domainEvents } from './domain_events.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import crypto from 'node:crypto';
 import {
   Tenant, User, AuthToken, AuthTokenType, Product, Fabric, InventoryLog,
@@ -49,8 +50,19 @@ export class Database {
   private skipAsyncHydration: boolean = false;
   private otpFailedAttempts = new Map<string, { count: number; resetAt: number }>();
 
+  /**
+   * Where the local snapshot lives. DB_SNAPSHOT_PATH overrides it. Under tests the default is a throwaway
+   * folder, never the project's `.data`, so a test run can never read or change real development data.
+   */
+  private static defaultSnapshotPath(): string {
+    const fromEnv = process.env.DB_SNAPSHOT_PATH?.trim();
+    if (fromEnv) return path.resolve(fromEnv);
+    if (process.env.NODE_ENV === 'test') return path.join(os.tmpdir(), 'vton-test-default', 'db_snapshot.json');
+    return path.resolve(process.cwd(), '.data', 'db_snapshot.json');
+  }
+
   constructor(customSnapshotPath?: string) {
-    this.snapshotPath = customSnapshotPath || path.resolve(process.cwd(), '.data', 'db_snapshot.json');
+    this.snapshotPath = customSnapshotPath || Database.defaultSnapshotPath();
     this.init();
     if (config.databaseUrl) {
       void this.initConnections(config.databaseUrl);

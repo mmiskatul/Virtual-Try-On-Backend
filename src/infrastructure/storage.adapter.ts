@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { getValidatedEnv } from './env.schema.js';
 
@@ -59,7 +60,13 @@ export function verifyStorageToken(bucket: string, objectKey: string, op: 'read'
  */
 class LocalPrivateStorageDriver implements StorageAdapter {
   public readonly driverName = 'local_private' as const;
-  private rootDir = path.resolve(process.cwd(), '.data', 'private_objects');
+  /** PRIVATE_OBJECTS_DIR overrides it. Under tests the default is a throwaway folder, never `.data`. */
+  private rootDir = path.resolve(
+    process.env.PRIVATE_OBJECTS_DIR?.trim() ||
+      (process.env.NODE_ENV === 'test'
+        ? path.join(os.tmpdir(), 'vton-test-default', 'private_objects')
+        : path.join(process.cwd(), '.data', 'private_objects'))
+  );
 
   private resolvePath(bucket: LogicalBucket, objectKey: string): string {
     const safeKey = sanitizeObjectKey(objectKey);
