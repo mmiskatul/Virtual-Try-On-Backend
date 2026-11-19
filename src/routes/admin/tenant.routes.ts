@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { db } from '../../infrastructure/database.js';
 import { createAdminMiddleware, registerScopedPreHandlers } from '../../infrastructure/auth.guard.js';
-import { requireAnyPermission, requirePermission } from '../../modules/rbac/rbac.catalog.js';
+import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
 
 const adminGuards = createAdminMiddleware();
 

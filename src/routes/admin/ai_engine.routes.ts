@@ -7,7 +7,7 @@ import {
   registerScopedPreHandlers,
 } from '../../infrastructure/auth.guard.js';
 import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
-import { requireAnyPermission, requirePermission } from '../../modules/rbac/rbac.catalog.js';
+import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
 import { isMaskedPlaceholder, maskSecret, sanitizeEnvValue, updateEnvFile } from '../../infrastructure/env_manager.js';
 
 const adminGuards = createAdminMiddleware();

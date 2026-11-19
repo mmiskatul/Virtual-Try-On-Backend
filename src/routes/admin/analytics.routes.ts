@@ -3,7 +3,7 @@ import { db } from '../../infrastructure/database.js';
 import { createAdminMiddleware, registerScopedPreHandlers } from '../../infrastructure/auth.guard.js';
 import { billingCreditService } from '../../modules/billing/billing.service.js';
 import { buildMonthlySeries } from '../../modules/admin/analytics_series.js';
-import { requireAnyPermission, requirePermission } from '../../modules/rbac/rbac.catalog.js';
+import { requireAnyPermission } from '../../modules/rbac/rbac.catalog.js';
 
 const adminGuards = createAdminMiddleware();
 

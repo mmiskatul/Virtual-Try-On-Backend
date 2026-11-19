@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import pg from 'pg';
-import { createPrismaInstance, disconnectPrisma, adoptGlobalPrisma } from './prisma.js';
+import { createPrismaInstance, adoptGlobalPrisma } from './prisma.js';
 import {
   Tenant,
   User,

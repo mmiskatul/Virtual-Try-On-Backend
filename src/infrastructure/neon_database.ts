@@ -1,7 +1,7 @@
 import pg from 'pg';
 import { POSTGRES_SCHEMA_SQL } from './sql_schema.js';
 import { createPgPool } from './prisma.js';
-import { Tenant, User, Product, Fabric, InventoryLog, Subscription, Order, AuditLog } from '../domain/types.js';
+import { Tenant, User, Product } from '../domain/types.js';
 
 export class NeonSqlDatabase {
   private pool: pg.Pool | null = null;
