@@ -299,7 +299,12 @@ export class TryOnOrchestrator {
         imageUrl: input.personImageUrl,
       });
 
-      const garmentUrl = input.garmentImageUrl || product.images?.[0];
+      // Prefer the brand's clear AI reference image (reserved specs key) over the styled display photo.
+      const aiReference = (product.specs as Record<string, string> | undefined)?._aiReferenceImage;
+      const garmentUrl =
+        aiReference && (!input.garmentImageUrl || (product.images || []).includes(input.garmentImageUrl))
+          ? aiReference
+          : input.garmentImageUrl || product.images?.[0];
       garmentRef = await this.ingestImageIntoBucket({
         bucket: 'brand-assets',
         objectKeyHint: `${product.tenantId}/${product.id}/${jobId}_garment.jpg`,

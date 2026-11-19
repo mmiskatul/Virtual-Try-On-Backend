@@ -316,7 +316,7 @@ export async function brandProductRoutes(app: FastifyInstance) {
   app.get('/api/v1/products', { preHandler: brandReadGuards }, listProductsHandler);
   app.get('/api/v1/brand/products', { preHandler: brandReadGuards }, listProductsHandler);
 
-  // Add Product Form Options (categories, collections, fabrics, SKU prefix, plan quota)
+  // Add Product Form Options (categories, collections, SKU prefix, plan quota)
   app.get('/api/v1/products/form-options', { preHandler: brandReadGuards }, async (request: FastifyRequest) => {
     const tenant = requireTenantContext(request.tenant);
     const [catList, colList] = await Promise.all([
@@ -324,12 +324,12 @@ export async function brandProductRoutes(app: FastifyInstance) {
       catalogRepository.listCollections(tenant.id),
     ]);
     const tenantProducts = db.getProductsByTenant(tenant.id);
-    const tenantFabrics = db.getFabricsByTenant(tenant.id);
     const sub = db.getSubscription(tenant.id);
 
+    // The brand's own categories come first. The standard list is offered only until the brand adds its first one.
     const categories = Array.from(
       new Set([
-        ...DEFAULT_APPAREL_CATEGORIES,
+        ...(catList.length > 0 ? [] : DEFAULT_APPAREL_CATEGORIES),
         ...catList.map((c) => c.name),
         ...tenantProducts.map((p) => p.category),
       ].filter(Boolean))
@@ -355,11 +355,6 @@ export async function brandProductRoutes(app: FastifyInstance) {
       {
         categories,
         collections,
-        fabrics: tenantFabrics.map((f) => ({
-          id: f.id,
-          name: f.name,
-          composition: f.composition,
-        })),
         tryOnCategories: ['tops', 'bottoms', 'dresses', 'outerwear', 'all'],
         defaultCurrency: 'BDT',
         suggestedSkuPrefix: prefixBase,

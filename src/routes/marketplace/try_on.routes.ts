@@ -6,6 +6,26 @@ import { db } from '../../infrastructure/database.js';
 import { externalVtonService } from '../../infrastructure/vton_api.js';
 import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
 
+/**
+ * Brands can upload a clear, flat "AI reference image" per product (stored under the reserved
+ * specs key `_aiReferenceImage`). When the client sends the product's normal display photo (or none),
+ * the AI model gets the reference image instead, so it can understand the real garment.
+ */
+function resolveGarmentImage(productId: unknown, requested: unknown): string {
+  const requestedUrl = typeof requested === 'string' ? requested : '';
+  if (typeof productId !== 'string' || !productId) return requestedUrl;
+  try {
+    const product = db.getProductById(productId);
+    const reference = (product?.specs as Record<string, string> | undefined)?._aiReferenceImage;
+    if (reference && (!requestedUrl || (product?.images || []).includes(requestedUrl))) {
+      return reference;
+    }
+  } catch {
+    // fall back to the image the client sent
+  }
+  return requestedUrl;
+}
+
 // Cache for try-on results uploaded to Cloudinary
 const cloudinaryTryOnCache = new Map<string, string>();
 const SAFE_JOB_ID_REGEX = /^[a-zA-Z0-9_-]{3,80}$/;
@@ -124,7 +144,10 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
 
   // Dispatch Virtual Try-On Job (External API or Local AI Engine)
   app.post('/api/v1/try-on/submit', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { personImage, garmentImage, category, productId, prompt, model_name, modelName } = (request.body as any) || {};
+    const { personImage, garmentImage: requestedGarmentImage, category, productId, prompt, model_name, modelName } =
+      (request.body as any) || {};
+    // Prefer the brand's clear AI reference image over the styled display photo.
+    const garmentImage = resolveGarmentImage(productId, requestedGarmentImage);
 
     if (!personImage || !garmentImage) {
       return reply.status(400).send({
@@ -220,7 +243,10 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
 
   // Direct Synchronous Try-On with Automatic Cloudinary Persistence
   app.post('/api/v1/try-on/direct', async (request: FastifyRequest, reply: FastifyReply) => {
-    const { personImage, garmentImage, category, productId, prompt, model_name, modelName } = (request.body as any) || {};
+    const { personImage, garmentImage: requestedGarmentImage, category, productId, prompt, model_name, modelName } =
+      (request.body as any) || {};
+    // Prefer the brand's clear AI reference image over the styled display photo.
+    const garmentImage = resolveGarmentImage(productId, requestedGarmentImage);
 
     if (!personImage || !garmentImage) {
       return reply.status(400).send({

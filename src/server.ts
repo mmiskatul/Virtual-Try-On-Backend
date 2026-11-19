@@ -17,7 +17,6 @@ import { storageRoutes } from './routes/storage.routes.js';
 import { brandAuthRoutes } from './routes/brand/auth.routes.js';
 import { brandProductRoutes } from './routes/brand/product.routes.js';
 import { brandCatalogExtRoutes } from './routes/brand/catalog_ext.routes.js';
-import { brandFabricRoutes } from './routes/brand/fabric.routes.js';
 import { brandInventoryRoutes } from './routes/brand/inventory.routes.js';
 import { brandOrderRoutes } from './routes/brand/order.routes.js';
 import { brandStorefrontRoutes } from './routes/brand/storefront.routes.js';
@@ -164,7 +163,6 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
     app.register(brandAuthRoutes);
     app.register(brandProductRoutes);
     app.register(brandCatalogExtRoutes);
-    app.register(brandFabricRoutes);
     app.register(brandInventoryRoutes);
     app.register(brandOrderRoutes);
     app.register(brandStorefrontRoutes);

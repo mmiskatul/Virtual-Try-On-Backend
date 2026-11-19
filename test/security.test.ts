@@ -74,7 +74,6 @@ async function runSecurityTests() {
   console.log('\n--- [3. Role & Tenant Authorization] ---');
   for (const [method, url] of [
     ['GET', '/api/v1/products'],
-    ['GET', '/api/v1/fabrics'],
     ['GET', '/api/v1/brand/orders'],
     ['GET', '/api/v1/inventory/logs'],
   ] as const) {
@@ -277,7 +276,6 @@ async function runSecurityTests() {
     ['GET', '/api/v1/admin/usage'],
     ['GET', '/api/v1/admin/auth/me'],
     ['GET', '/api/v1/uploads/status'],
-    ['GET', '/api/v1/fabrics'],
     ['GET', '/api/v1/brand/orders'],
     ['GET', '/api/v1/inventory/logs'],
     ['GET', '/api/v1/brand/profile'],
@@ -305,7 +303,7 @@ async function runSecurityTests() {
     assert(res.statusCode === 403, `Brand cross-portal GET ${url} blocked with 403 (got ${res.statusCode})`);
   }
 
-  for (const url of ['/api/v1/fabrics', '/api/v1/uploads/status', '/api/v1/brand/orders', '/api/v1/auth/me']) {
+  for (const url of ['/api/v1/uploads/status', '/api/v1/brand/orders', '/api/v1/auth/me']) {
     const res = await app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${adminToken}` } });
     assert(res.statusCode === 403, `Admin without View-As blocked from brand GET ${url} with 403 (got ${res.statusCode})`);
   }

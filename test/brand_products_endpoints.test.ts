@@ -240,7 +240,7 @@ describe('Brand Products & Catalog Management Endpoints', () => {
     await app.close();
   });
 
-  it('supports Category, Collection, and Fabric full CRUD with tenant isolation', async () => {
+  it('supports Category and Collection full CRUD with tenant isolation', async () => {
     const app = createApp('all');
 
     // Category create -> update -> delete
@@ -301,48 +301,6 @@ describe('Brand Products & Catalog Management Endpoints', () => {
       headers: { Authorization: `Bearer ${auraToken}` },
     });
     expect(colDelete.statusCode).toBe(200);
-
-    // Fabric create -> update -> delete with Zod validation
-    const fabInvalid = await app.inject({
-      method: 'POST',
-      url: '/api/v1/fabrics',
-      headers: { Authorization: `Bearer ${auraToken}` },
-      payload: { name: 'A', composition: '' },
-    });
-    expect(fabInvalid.statusCode).toBe(400);
-    expect(JSON.parse(fabInvalid.body).code).toBe('VALIDATION_ERROR');
-
-    const fabCreate = await app.inject({
-      method: 'POST',
-      url: '/api/v1/fabrics',
-      headers: { Authorization: `Bearer ${auraToken}` },
-      payload: {
-        name: 'Organic Poplin',
-        composition: '100% GOTS Organic Cotton',
-        stretch: 'LOW',
-        thickness: 'LIGHT',
-        care: 'Cold hand wash',
-      },
-    });
-    expect(fabCreate.statusCode).toBe(201);
-    const fabric = JSON.parse(fabCreate.body).fabric;
-    expect(fabric.careInstructions).toBe('Cold hand wash');
-
-    const fabUpdate = await app.inject({
-      method: 'PUT',
-      url: `/api/v1/fabrics/${fabric.id}`,
-      headers: { Authorization: `Bearer ${auraToken}` },
-      payload: { thickness: 'MEDIUM' },
-    });
-    expect(fabUpdate.statusCode).toBe(200);
-    expect(JSON.parse(fabUpdate.body).fabric.thickness).toBe('MEDIUM');
-
-    const fabDelete = await app.inject({
-      method: 'DELETE',
-      url: `/api/v1/fabrics/${fabric.id}`,
-      headers: { Authorization: `Bearer ${auraToken}` },
-    });
-    expect(fabDelete.statusCode).toBe(200);
 
     await app.close();
   });

@@ -29,7 +29,7 @@ async function bootstrap() {
     const isSql = db.isNeonSqlActive();
 
     console.log(`✅ [Unified Backend]    Listening on http://${config.host}:${config.port}`);
-    console.log(`   ├─ Brand API:           http://${config.host}:${config.port}/api/v1/auth, /products, /fabrics...`);
+    console.log(`   ├─ Brand API:           http://${config.host}:${config.port}/api/v1/auth, /products...`);
     console.log(`   ├─ Marketplace API:     http://${config.host}:${config.port}/api/v1/marketplace/..., /checkout...`);
     console.log(`   ├─ Super Admin API:     http://${config.host}:${config.port}/api/v1/admin/...`);
     console.log(`   └─ Health & Metrics:    http://${config.host}:${config.port}/health, /live, /ready, /metrics\n`);

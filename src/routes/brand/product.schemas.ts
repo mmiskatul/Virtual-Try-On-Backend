@@ -203,40 +203,6 @@ export const ModerateProductSchema = z.object({
   sponsored: z.boolean().optional(),
 });
 
-export const FabricIdParamsSchema = z.object({
-  id: z.string().trim().min(1, 'Fabric ID is required.').max(120),
-});
-
-export const CreateFabricInputSchema = z.object({
-  name: z.string().trim().min(2, 'Fabric name must be at least 2 characters.').max(120),
-  composition: z.string().trim().min(2, 'Fabric composition is required.').max(200),
-  color: z.string().trim().max(64).optional(),
-  pattern: z.string().trim().max(64).optional(),
-  textureUrl: SafeImageAssetSchema.optional(),
-  weightGsm: z.coerce.number().finite().positive().max(2000).optional(),
-  stretch: z.enum(['NONE', 'LOW', 'MEDIUM', 'HIGH']).optional(),
-  transparency: z.enum(['OPAQUE', 'SEMI_SHEER', 'SHEER']).optional(),
-  thickness: z.enum(['LIGHT', 'MEDIUM', 'HEAVY']).optional(),
-  careInstructions: z.string().trim().max(300).optional(),
-  care: z.string().trim().max(300).optional(),
-});
-
-export const UpdateFabricInputSchema = z
-  .object({
-    name: z.string().trim().min(2, 'Fabric name must be at least 2 characters.').max(120).optional(),
-    composition: z.string().trim().min(2, 'Composition must be at least 2 characters.').max(200).optional(),
-    color: z.string().trim().max(64).optional(),
-    pattern: z.string().trim().max(64).optional(),
-    textureUrl: SafeImageAssetSchema.optional(),
-    weightGsm: z.coerce.number().finite().positive().max(2000).optional(),
-    stretch: z.enum(['NONE', 'LOW', 'MEDIUM', 'HIGH']).optional(),
-    transparency: z.enum(['OPAQUE', 'SEMI_SHEER', 'SHEER']).optional(),
-    thickness: z.enum(['LIGHT', 'MEDIUM', 'HEAVY']).optional(),
-    careInstructions: z.string().trim().max(300).optional(),
-    care: z.string().trim().max(300).optional(),
-  })
-  .refine((d) => Object.keys(d).length > 0, 'Provide at least one fabric field to update.');
-
 export const ProductExportJsonResponseSchema = z.object({
   total: z.number().int().nonnegative(),
   exportedAt: z.string(),
@@ -286,13 +252,6 @@ export const CheckSkuResponseSchema = z.object({
 export const AddProductFormOptionsResponseSchema = z.object({
   categories: z.array(z.string()),
   collections: z.array(z.string()),
-  fabrics: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      composition: z.string(),
-    })
-  ),
   tryOnCategories: z.array(z.enum(['tops', 'bottoms', 'dresses', 'outerwear', 'all'])),
   defaultCurrency: z.literal('BDT'),
   suggestedSkuPrefix: z.string(),
