@@ -264,6 +264,35 @@ describe('Brand product contract', () => {
     expect((await update(created.id, {})).statusCode).toBe(400);
   });
 
+  it('requires sizes and colours to add up to the total stock', async () => {
+    const variants = (a: number, b: number) => [
+      { sku: 'STK-S', size: 'S', color: 'Red', stockQuantity: a, available: a > 0 },
+      { sku: 'STK-M', size: 'M', color: 'Red', stockQuantity: b, available: b > 0 },
+    ];
+
+    // Exactly the total: accepted and saved per size.
+    const ok = await create(validBody({ stock: 30, variants: variants(10, 20) }));
+    expect(ok.statusCode, ok.body).toBe(201);
+    const saved = JSON.parse(ok.body).product;
+    expect(saved.variants.map((v: any) => v.stockQuantity)).toEqual([10, 20]);
+
+    // Fewer assigned than the total: rejected with the number that is left.
+    const under = await create(validBody({ stock: 30, variants: variants(10, 15) }));
+    expect(under.statusCode).toBe(400);
+    expect(JSON.parse(under.body).issues[0].message).toContain('5 left');
+
+    // More assigned than the total: rejected too.
+    const over = await create(validBody({ stock: 30, variants: variants(20, 20) }));
+    expect(over.statusCode).toBe(400);
+    expect(JSON.parse(over.body).issues[0].message).toContain('10 more than the total stock of 30');
+
+    // Same rule on update when both are sent.
+    const bad = await update(saved.id, { stock: 50, variants: variants(10, 20) });
+    expect(bad.statusCode).toBe(400);
+    const good = await update(saved.id, { stock: 50, variants: variants(25, 25) });
+    expect(good.statusCode).toBe(200);
+  });
+
   it('keeps related settings consistent', async () => {
     const draft = JSON.parse(
       (await create(validBody({ catalogStatus: 'DRAFT', brandStorefrontPublished: true, marketplacePublished: true }))).body

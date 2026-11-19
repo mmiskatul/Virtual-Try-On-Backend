@@ -224,9 +224,24 @@ type CrossCheckable = {
   price?: number;
   compareAtPrice?: number | null;
   costPrice?: number | null;
+  stock?: number;
+  variants?: Array<{ stockQuantity: number }>;
 };
 
+/** Sizes & colours share out the total stock: what is assigned to them must add up to it exactly. */
+export function variantStockMessage(totalStock: number, assigned: number): string | null {
+  if (assigned === totalStock) return null;
+  return assigned < totalStock
+    ? `Assign all ${totalStock} items to sizes and colours (${totalStock - assigned} left).`
+    : `Sizes and colours add up to ${assigned}, which is ${assigned - totalStock} more than the total stock of ${totalStock}.`;
+}
+
 function crossFieldChecks(data: CrossCheckable, ctx: z.RefinementCtx) {
+  if (data.variants && data.variants.length > 0 && typeof data.stock === 'number') {
+    const assigned = data.variants.reduce((sum, v) => sum + v.stockQuantity, 0);
+    const message = variantStockMessage(data.stock, assigned);
+    if (message) ctx.addIssue({ code: 'custom', path: ['variants'], message });
+  }
   if (typeof data.compareAtPrice === 'number' && typeof data.price === 'number' && data.compareAtPrice <= data.price) {
     ctx.addIssue({
       code: 'custom',
