@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { POSTGRES_SCHEMA_SQL } from './sql_schema.js';
+import { packProductMeta, unpackProductMeta } from '../domain/product_meta.js';
 import { createPgPool } from './prisma.js';
 import { Tenant, User, Product } from '../domain/types.js';
 
@@ -179,8 +180,8 @@ export class NeonSqlDatabase {
         id, tenant_id, name, slug, description, category, sub_category, collection, sku,
         price, compare_at_price, images, fabric_ids, tags, brand_storefront_published,
         marketplace_published, is_try_on_eligible, try_on_category, specs, variants,
-        created_at, updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+        created_at, updated_at, catalog_meta
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
       RETURNING *
     `;
     const values = [
@@ -190,7 +191,7 @@ export class NeonSqlDatabase {
       JSON.stringify(product.fabricIds || []), JSON.stringify(product.tags || []),
       product.brandStorefrontPublished, product.marketplacePublished, product.isTryOnEligible,
       product.tryOnCategory, JSON.stringify(product.specs || {}), JSON.stringify(product.variants || []),
-      product.createdAt, product.updatedAt
+      product.createdAt, product.updatedAt, JSON.stringify(packProductMeta(product))
     ];
     const res = await this.pool.query(q, values);
     return this.mapProduct(res.rows[0]);
@@ -205,7 +206,7 @@ export class NeonSqlDatabase {
       UPDATE products SET name = $3, slug = $4, description = $5, category = $6, sub_category = $7,
         collection = $8, sku = $9, price = $10, compare_at_price = $11, images = $12, fabric_ids = $13,
         tags = $14, brand_storefront_published = $15, marketplace_published = $16, is_try_on_eligible = $17,
-        try_on_category = $18, specs = $19, variants = $20, updated_at = $21
+        try_on_category = $18, specs = $19, variants = $20, updated_at = $21, catalog_meta = $22
       WHERE id = $1 AND tenant_id = $2
       RETURNING *
     `;
@@ -215,7 +216,7 @@ export class NeonSqlDatabase {
       merged.compareAtPrice || null, JSON.stringify(merged.images || []), JSON.stringify(merged.fabricIds || []),
       JSON.stringify(merged.tags || []), merged.brandStorefrontPublished, merged.marketplacePublished,
       merged.isTryOnEligible, merged.tryOnCategory, JSON.stringify(merged.specs || {}),
-      JSON.stringify(merged.variants || []), merged.updatedAt
+      JSON.stringify(merged.variants || []), merged.updatedAt, JSON.stringify(packProductMeta(merged))
     ];
     const res = await this.pool.query(q, values);
     return res.rows[0] ? this.mapProduct(res.rows[0]) : undefined;
@@ -301,6 +302,7 @@ export class NeonSqlDatabase {
       tryOnCategory: row.try_on_category,
       specs: typeof row.specs === 'string' ? JSON.parse(row.specs) : (row.specs || {}),
       variants: typeof row.variants === 'string' ? JSON.parse(row.variants) : (row.variants || []),
+      ...unpackProductMeta(row.catalog_meta),
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at)
     };

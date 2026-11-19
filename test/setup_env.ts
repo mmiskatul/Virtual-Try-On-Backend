@@ -22,6 +22,10 @@ process.env.WEBHOOK_RETRY_DELAYS_MS = '20,20';
 const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vton-test-'));
 process.env.DB_SNAPSHOT_PATH = path.join(testDataDir, 'db_snapshot.json');
 process.env.PRIVATE_OBJECTS_DIR = path.join(testDataDir, 'private_objects');
-afterAll(() => {
-  fs.rmSync(testDataDir, { recursive: true, force: true });
-});
+const cleanupTestData = () => fs.rmSync(testDataDir, { recursive: true, force: true });
+try {
+  afterAll(cleanupTestData);
+} catch {
+  // Script-style tests (run with tsx, not vitest) have no suite to hook into, so clean up when the process exits.
+  process.on('exit', cleanupTestData);
+}

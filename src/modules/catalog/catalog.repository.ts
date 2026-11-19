@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { toPublicProduct } from '../../domain/product_meta.js';
 import { Product } from '../../domain/types.js';
 import { db } from '../../infrastructure/database.js';
 import { getGlobalPrisma } from '../../infrastructure/prisma.js';
@@ -892,7 +893,7 @@ export class CatalogRepository {
       const tenant = activeTenants.get(p.tenantId);
       const pub = memoryPublications.get(p.id);
       return {
-        ...p,
+        ...toPublicProduct(p),
         brandName: tenant?.name || 'Partner Brand',
         brandSlug: tenant?.slug || 'brand',
         brandLogo: tenant?.logoUrl,
@@ -911,7 +912,8 @@ export class CatalogRepository {
 
     const products = db
       .getProductsByTenant(tenant.id)
-      .filter((p) => p.brandStorefrontPublished && !this.isModeratedOut(p.id));
+      .filter((p) => p.brandStorefrontPublished && !this.isModeratedOut(p.id))
+      .map((p) => toPublicProduct(p));
     const [categories, collections] = await Promise.all([
       this.listCategories(tenant.id),
       this.listCollections(tenant.id),

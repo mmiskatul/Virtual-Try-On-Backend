@@ -300,7 +300,8 @@ export class TryOnOrchestrator {
       });
 
       // Prefer the brand's clear AI reference image (reserved specs key) over the styled display photo.
-      const aiReference = (product.specs as Record<string, string> | undefined)?._aiReferenceImage;
+      const aiReference =
+        product.aiReferenceImage || (product.specs as Record<string, string> | undefined)?._aiReferenceImage;
       const garmentUrl =
         aiReference && (!input.garmentImageUrl || (product.images || []).includes(input.garmentImageUrl))
           ? aiReference

@@ -28,14 +28,15 @@ import {
   ProductIdParamsSchema,
   ProductListQuerySchema,
   ProductPublishInputSchema,
-  UpdateProductInputSchema,
 } from './product.schemas.js';
 import {
+  BrandProductCreateResponseSchema,
+  BrandProductListResponseSchema,
   CreateProductInputSchema,
-  ProductCreateResponseSchema,
-  ProductListResponseSchema,
-  validateZodOutput,
-} from './storefront.schemas.js';
+  UpdateProductInputSchema,
+  describeProductContract,
+} from './product.contract.js';
+import { validateZodOutput } from './storefront.schemas.js';
 
 const brandReadGuards = createBrandMiddleware(requirePermission('brand:products', 'read'));
 const brandWriteGuards = createBrandMiddleware(requirePermission('brand:products', 'write'));
@@ -147,6 +148,8 @@ function normalizeTryOnCategory(raw?: string): Product['tryOnCategory'] {
 }
 
 // Starter collections offered in the add-product form until the brand creates its own.
+const DEFAULT_LOW_STOCK_THRESHOLD = 5;
+
 const DEFAULT_COLLECTIONS = [
   'New Arrivals',
   'Best Sellers',
@@ -171,6 +174,25 @@ const DEFAULT_APPAREL_CATEGORIES = [
   'Sarees',
   'Accessories',
 ];
+
+/**
+ * Keeps related product settings consistent no matter which form sent them:
+ *  - a draft or archived product is never visible to shoppers
+ *  - try-on inclusion switches only apply when try-on is on, and marketplace try-on needs a marketplace listing
+ */
+function applyProductConsistency(product: Product): Product {
+  if (product.catalogStatus === 'DRAFT' || product.catalogStatus === 'ARCHIVED') {
+    product.brandStorefrontPublished = false;
+    product.marketplacePublished = false;
+  }
+  if (!product.isTryOnEligible) {
+    product.includeInBrandTryOn = false;
+    product.includeInMarketplaceTryOn = false;
+  } else if (!product.marketplacePublished) {
+    product.includeInMarketplaceTryOn = false;
+  }
+  return product;
+}
 
 async function createBrandProductHandler(
   request: FastifyRequest,
@@ -270,11 +292,20 @@ async function createBrandProductHandler(
     marketplacePublished: body.marketplacePublished ?? false,
     isTryOnEligible: isTryOnEligible ?? true,
     tryOnCategory: normalizeTryOnCategory(tryOnCategory),
+    shortDescription: body.shortDescription || undefined,
+    aiReferenceImage: body.aiReferenceImage || undefined,
+    costPrice: body.costPrice ?? undefined,
+    lowStockThreshold: body.lowStockThreshold ?? DEFAULT_LOW_STOCK_THRESHOLD,
+    warehouseLocation: body.warehouseLocation || undefined,
+    catalogStatus: body.catalogStatus ?? 'ACTIVE',
+    includeInBrandTryOn: body.includeInBrandTryOn ?? true,
+    includeInMarketplaceTryOn: body.includeInMarketplaceTryOn ?? false,
     specs: body.specs || {},
     variants: resolvedVariants,
     createdAt: now,
     updatedAt: now,
   };
+  applyProductConsistency(product);
 
   try {
     const created = await db.runTransaction(async () => db.createProduct(product));
@@ -292,7 +323,7 @@ async function createBrandProductHandler(
     });
 
     const responsePayload = validateZodOutput(
-      ProductCreateResponseSchema,
+      BrandProductCreateResponseSchema,
       { message: 'Product created successfully', product: created },
       routeLabel
     );
@@ -319,7 +350,7 @@ export async function brandProductRoutes(app: FastifyInstance) {
     const query = parseWithSchema(ProductListQuerySchema, request.query ?? {});
     const products = filterTenantProducts(db.getProductsByTenant(tenant.id), query);
     return validateZodOutput(
-      ProductListResponseSchema,
+      BrandProductListResponseSchema,
       { products },
       'GET /api/v1/products'
     );
@@ -338,21 +369,26 @@ export async function brandProductRoutes(app: FastifyInstance) {
     const tenantProducts = db.getProductsByTenant(tenant.id);
     const sub = db.getSubscription(tenant.id);
 
-    // The brand's own categories come first. The standard list is offered only until the brand adds its first one.
+    // Once the brand has its own categories, only those are offered. Until then: the standard list plus
+    // any category its existing products already use.
     const categories = Array.from(
-      new Set([
-        ...(catList.length > 0 ? [] : DEFAULT_APPAREL_CATEGORIES),
-        ...catList.map((c) => c.name),
-        ...tenantProducts.map((p) => p.category),
-      ].filter(Boolean))
+      new Set(
+        (catList.length > 0
+          ? catList.map((c) => c.name)
+          : [...DEFAULT_APPAREL_CATEGORIES, ...tenantProducts.map((p) => p.category)]
+        ).filter(Boolean)
+      )
     );
 
     const collections = Array.from(
-      new Set([
-        ...(colList.length > 0 ? [] : DEFAULT_COLLECTIONS),
-        ...colList.map((c) => c.title),
-        ...tenantProducts.map((p) => p.collection).filter((c): c is string => Boolean(c)),
-      ])
+      new Set(
+        colList.length > 0
+          ? colList.map((c) => c.title)
+          : [
+              ...DEFAULT_COLLECTIONS,
+              ...tenantProducts.map((p) => p.collection).filter((c): c is string => Boolean(c)),
+            ]
+      )
     );
 
     const prefixBase = (tenant.slug || tenant.name || 'BRD')
@@ -405,6 +441,9 @@ export async function brandProductRoutes(app: FastifyInstance) {
       'GET /api/v1/products/check-sku'
     );
   });
+
+  // The fixed rules for every product field. The dashboard mirrors these exactly.
+  app.get('/api/v1/products/contract', { preHandler: brandReadGuards }, async () => describeProductContract());
 
   // Export Tenant Catalog (CSV or JSON) - declared before /:id to avoid route shadowing
   app.get('/api/v1/products/export', { preHandler: brandReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
@@ -583,7 +622,7 @@ export async function brandProductRoutes(app: FastifyInstance) {
         HIDE_STOREFRONT: { brandStorefrontPublished: false },
         ENABLE_TRYON: { isTryOnEligible: true },
         DISABLE_TRYON: { isTryOnEligible: false },
-        ARCHIVE: { brandStorefrontPublished: false, marketplacePublished: false },
+        ARCHIVE: { brandStorefrontPublished: false, marketplacePublished: false, catalogStatus: 'ARCHIVED' },
       };
 
       const updated = db.updateProduct(productId, tenant.id, updatesByAction[action]);
@@ -672,6 +711,28 @@ export async function brandProductRoutes(app: FastifyInstance) {
     if (body.isTryOnEligible !== undefined) safeUpdates.isTryOnEligible = body.isTryOnEligible;
     if (body.tryOnCategory !== undefined) safeUpdates.tryOnCategory = normalizeTryOnCategory(body.tryOnCategory);
     if (body.specs !== undefined) safeUpdates.specs = body.specs;
+    if (body.shortDescription !== undefined) safeUpdates.shortDescription = body.shortDescription || undefined;
+    // `null` removes these optional values; an explicit undefined key clears them in every database adapter.
+    if (body.aiReferenceImage !== undefined) safeUpdates.aiReferenceImage = body.aiReferenceImage || undefined;
+    if (body.costPrice !== undefined) safeUpdates.costPrice = body.costPrice === null ? undefined : Number(body.costPrice);
+    if (body.lowStockThreshold !== undefined) safeUpdates.lowStockThreshold = body.lowStockThreshold;
+    if (body.warehouseLocation !== undefined) safeUpdates.warehouseLocation = body.warehouseLocation || undefined;
+    if (body.catalogStatus !== undefined) safeUpdates.catalogStatus = body.catalogStatus;
+    if (body.includeInBrandTryOn !== undefined) safeUpdates.includeInBrandTryOn = body.includeInBrandTryOn;
+    if (body.includeInMarketplaceTryOn !== undefined) safeUpdates.includeInMarketplaceTryOn = body.includeInMarketplaceTryOn;
+
+    // Re-check the related settings against the final state of the product.
+    const projected = applyProductConsistency({ ...existing, ...safeUpdates });
+    for (const key of [
+      'brandStorefrontPublished',
+      'marketplacePublished',
+      'includeInBrandTryOn',
+      'includeInMarketplaceTryOn',
+    ] as const) {
+      if (projected[key] !== (existing[key] ?? undefined) || key in safeUpdates) {
+        (safeUpdates as Record<string, unknown>)[key] = projected[key];
+      }
+    }
 
     if (body.variants !== undefined) {
       safeUpdates.variants = body.variants.map((v, idx) => ({

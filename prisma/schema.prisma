@@ -100,6 +100,8 @@ model Product {
   tryOnCategory            String   @default("tops") @map("try_on_category") @db.VarChar(64)
   specs                    Json?
   variants                 Json     @default("[]")
+  // Short summary, cost price, low-stock alert, warehouse, catalog status, try-on switches, AI reference image.
+  catalogMeta              Json?    @map("catalog_meta")
   createdAt                BigInt   @map("created_at")
   updatedAt                BigInt   @map("updated_at")
 

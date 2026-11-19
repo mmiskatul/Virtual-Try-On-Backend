@@ -1,4 +1,5 @@
 import { PrismaClient } from '@prisma/client';
+import { hasProductMetaUpdate, packProductMeta, unpackProductMeta } from '../domain/product_meta.js';
 import pg from 'pg';
 import { createPrismaInstance, adoptGlobalPrisma } from './prisma.js';
 import {
@@ -359,6 +360,7 @@ export class PrismaDatabase {
         tryOnCategory: product.tryOnCategory || 'tops',
         specs: (product.specs as any) || {},
         variants: (product.variants as any) || [],
+        catalogMeta: packProductMeta(product) as any,
         createdAt: BigInt(product.createdAt),
         updatedAt: BigInt(product.updatedAt),
       },
@@ -390,6 +392,9 @@ export class PrismaDatabase {
     if (updates.tryOnCategory !== undefined) data.tryOnCategory = updates.tryOnCategory;
     if (updates.specs !== undefined) data.specs = updates.specs as any;
     if (updates.variants !== undefined) data.variants = updates.variants as any;
+    if (hasProductMetaUpdate(updates)) {
+      data.catalogMeta = packProductMeta({ ...existing, ...updates }) as any;
+    }
 
     const updated = await this.prisma.product.update({
       where: { id },
@@ -721,6 +726,7 @@ export class PrismaDatabase {
           tryOnCategory: p.tryOnCategory,
           specs: (p.specs as any) || {},
           variants: (p.variants as any) || [],
+          catalogMeta: packProductMeta(p) as any,
           updatedAt: BigInt(p.updatedAt),
         },
         create: {
@@ -744,6 +750,7 @@ export class PrismaDatabase {
           tryOnCategory: p.tryOnCategory,
           specs: (p.specs as any) || {},
           variants: (p.variants as any) || [],
+          catalogMeta: packProductMeta(p) as any,
           createdAt: BigInt(p.createdAt),
           updatedAt: BigInt(p.updatedAt),
         },
@@ -1144,6 +1151,7 @@ export class PrismaDatabase {
       tryOnCategory: row.tryOnCategory as TryOnCategory,
       specs: (row.specs as Record<string, string>) || undefined,
       variants: Array.isArray(row.variants) ? (row.variants as ProductVariant[]) : [],
+      ...unpackProductMeta(row.catalogMeta),
       createdAt: Number(row.createdAt),
       updatedAt: Number(row.updatedAt),
     };

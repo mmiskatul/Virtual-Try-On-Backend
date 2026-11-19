@@ -166,28 +166,6 @@ export const ProductVariantSchema = z.object({
   available: z.boolean(),
 });
 
-export const CreateProductInputSchema = z.object({
-  name: z.string().trim().min(1, 'Product name is required.').max(160),
-  category: z.string().trim().min(1, 'Product category is required.').max(80),
-  price: z.coerce.number().finite('Product price must be a finite number.').min(0, 'Product price must be non-negative.').max(10_000_000),
-  sku: z.string().trim().min(1, 'Product SKU is required.').max(120),
-  description: z.string().trim().max(4000).optional(),
-  subCategory: z.string().trim().max(80).optional(),
-  collection: z.string().trim().max(80).optional(),
-  currency: NormalizedCurrencyInputSchema.optional(),
-  compareAtPrice: z.coerce.number().finite().min(0).max(10_000_000).optional(),
-  stock: z.coerce.number().int().min(0).max(1_000_000).optional(),
-  images: z.array(SafeImageAssetSchema).max(12).optional(),
-  fabricIds: z.array(z.string().trim().min(1).max(120)).max(24).optional(),
-  tags: z.array(z.string().trim().min(1).max(40)).max(30).optional(),
-  brandStorefrontPublished: z.boolean().optional(),
-  marketplacePublished: z.boolean().optional(),
-  isTryOnEligible: z.boolean().optional(),
-  tryOnCategory: z.string().trim().min(1).max(60).optional(),
-  specs: z.record(z.string(), z.string()).optional(),
-  variants: z.array(ProductVariantSchema).max(100).optional(),
-});
-
 // ─── OUTPUT SCHEMAS ───────────────────────────────────────────────────────────
 
 export const StorefrontSettingsOutputSchema = z
@@ -301,6 +279,7 @@ export const ProductOutputSchema = z
     tenantId: z.string(),
     name: z.string(),
     slug: z.string(),
+    shortDescription: z.string().optional(),
     description: z.string(),
     category: z.string(),
     subCategory: z.string().optional(),
@@ -345,15 +324,6 @@ export const UploadResponseSchema = z.object({
   mimeType: z.string().optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
   note: z.string().optional(),
-});
-
-export const ProductListResponseSchema = z.object({
-  products: z.array(ProductOutputSchema),
-});
-
-export const ProductCreateResponseSchema = z.object({
-  message: z.string(),
-  product: ProductOutputSchema,
 });
 
 export function formatZodValidationError(error: z.ZodError): {

@@ -60,9 +60,11 @@ CREATE TABLE IF NOT EXISTS products (
   try_on_category VARCHAR(64) NOT NULL DEFAULT 'tops',
   specs JSONB,
   variants JSONB NOT NULL DEFAULT '[]'::jsonb,
+  catalog_meta JSONB,
   created_at BIGINT NOT NULL,
   updated_at BIGINT NOT NULL
 );
+ALTER TABLE products ADD COLUMN IF NOT EXISTS catalog_meta JSONB;
 CREATE INDEX IF NOT EXISTS idx_products_tenant_id ON products(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_products_marketplace ON products(marketplace_published);
 

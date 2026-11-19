@@ -433,7 +433,7 @@ export async function brandOverviewRoutes(app: FastifyInstance) {
         sku: p.sku,
         price: Number(p.price) || 0,
         stock: getProductStock(p),
-        lowStockThreshold: LOW_STOCK_THRESHOLD,
+        lowStockThreshold: p.lowStockThreshold ?? LOW_STOCK_THRESHOLD,
         salesCount: salesByProduct.get(p.id) || 0,
         image: p.images?.[0] || FALLBACK_PRODUCT_IMAGE,
       }));

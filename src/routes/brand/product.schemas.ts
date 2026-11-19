@@ -1,10 +1,6 @@
 import { z } from 'zod';
-import {
-  NormalizedCurrencyInputSchema,
-  ProductOutputSchema,
-  ProductVariantSchema,
-  SafeImageAssetSchema,
-} from './storefront.schemas.js';
+import { BrandProductOutputSchema } from './product.contract.js';
+import { SafeImageAssetSchema } from './storefront.schemas.js';
 
 export const PRODUCT_BULK_ACTIONS = [
   'PUBLISH_MARKETPLACE',
@@ -33,38 +29,6 @@ export const ProductListQuerySchema = z.object({
   status: z.enum(['ALL', 'MARKETPLACE', 'STOREFRONT_ONLY', 'DRAFT', 'TRYON']).optional(),
   sortBy: z.enum(['latest', 'price-asc', 'price-desc', 'sales', 'name']).optional(),
 });
-
-export const UpdateProductInputSchema = z
-  .object({
-    name: z.string().trim().min(1, 'Product name cannot be empty.').max(160).optional(),
-    description: z.string().trim().max(4000).optional(),
-    category: z.string().trim().min(1, 'Category cannot be empty.').max(80).optional(),
-    subCategory: z.string().trim().max(80).optional(),
-    collection: z.string().trim().max(80).optional(),
-    sku: z.string().trim().min(1, 'SKU cannot be empty.').max(120).optional(),
-    currency: NormalizedCurrencyInputSchema.optional(),
-    price: z.coerce
-      .number()
-      .finite('Product price must be a finite number.')
-      .min(0, 'Product price must be non-negative.')
-      .max(10_000_000)
-      .optional(),
-    compareAtPrice: z.union([z.coerce.number().finite().min(0).max(10_000_000), z.null()]).optional(),
-    stock: z.coerce.number().int().min(0).max(1_000_000).optional(),
-    images: z.array(SafeImageAssetSchema).max(12).optional(),
-    fabricIds: z.array(z.string().trim().min(1).max(120)).max(24).optional(),
-    tags: z.array(z.string().trim().min(1).max(40)).max(30).optional(),
-    brandStorefrontPublished: z.boolean().optional(),
-    marketplacePublished: z.boolean().optional(),
-    isTryOnEligible: z.boolean().optional(),
-    tryOnCategory: z.string().trim().min(1).max(60).optional(),
-    specs: z.record(z.string(), z.string()).optional(),
-    variants: z.array(ProductVariantSchema).max(100).optional(),
-  })
-  .refine(
-    (data) => Object.keys(data).length > 0,
-    'At least one mutable product field must be provided for update.'
-  );
 
 export const ProductPublishInputSchema = z
   .object({
@@ -206,7 +170,7 @@ export const ModerateProductSchema = z.object({
 export const ProductExportJsonResponseSchema = z.object({
   total: z.number().int().nonnegative(),
   exportedAt: z.string(),
-  products: z.array(ProductOutputSchema),
+  products: z.array(BrandProductOutputSchema),
 });
 
 export const BulkProductActionResponseSchema = z.object({
@@ -214,7 +178,7 @@ export const BulkProductActionResponseSchema = z.object({
   action: z.enum(PRODUCT_BULK_ACTIONS),
   updatedCount: z.number().int().nonnegative(),
   skippedCount: z.number().int().nonnegative(),
-  products: z.array(ProductOutputSchema),
+  products: z.array(BrandProductOutputSchema),
   errors: z.array(
     z.object({
       productId: z.string(),
@@ -228,7 +192,7 @@ export const BulkImportProductsResponseSchema = z.object({
   message: z.string(),
   importedCount: z.number().int().nonnegative(),
   skippedCount: z.number().int().nonnegative(),
-  importedProducts: z.array(ProductOutputSchema),
+  importedProducts: z.array(BrandProductOutputSchema),
   skipped: z.array(
     z.object({
       rowNumber: z.number().int().positive(),

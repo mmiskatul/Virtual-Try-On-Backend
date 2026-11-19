@@ -1,4 +1,5 @@
 import { domainEvents } from './domain_events.js';
+import { toPublicProduct } from '../domain/product_meta.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -930,7 +931,7 @@ export class Database {
       .map(p => {
         const tenant = activeTenants.get(p.tenantId)!;
         return {
-          ...p,
+          ...toPublicProduct(p),
           brandName: tenant.name,
           brandSlug: tenant.slug
         };
@@ -938,7 +939,9 @@ export class Database {
   }
 
   public getStorefrontProducts(tenantId: string): Product[] {
-    return this.data.products.filter(p => p.tenantId === tenantId && p.brandStorefrontPublished);
+    return this.data.products
+      .filter(p => p.tenantId === tenantId && p.brandStorefrontPublished)
+      .map(p => toPublicProduct(p));
   }
 
   // --- Fabrics ---

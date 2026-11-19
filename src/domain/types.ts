@@ -217,11 +217,15 @@ export interface ProductVariant {
   available: boolean;
 }
 
+export type CatalogStatus = 'ACTIVE' | 'DRAFT' | 'ARCHIVED';
+
 export interface Product {
   id: string;
   tenantId: string;
   name: string;
   slug: string;
+  /** Short catalog-card summary (max 160 chars). */
+  shortDescription?: string;
   description: string;
   category: string;
   subCategory?: string;
@@ -236,6 +240,19 @@ export interface Product {
   marketplacePublished: boolean;
   isTryOnEligible: boolean;
   tryOnCategory: TryOnCategory;
+  /** Show this product on the brand's own try-on page. */
+  includeInBrandTryOn?: boolean;
+  /** Show this product in the marketplace try-on (only when also published to the marketplace). */
+  includeInMarketplaceTryOn?: boolean;
+  /** Clear flat photo of the garment given to the AI model. Never shown to shoppers. */
+  aiReferenceImage?: string;
+  /** Brand-private: what the garment costs the brand. Never exposed publicly. */
+  costPrice?: number;
+  /** Brand-private: alert when stock falls below this number. */
+  lowStockThreshold?: number;
+  /** Brand-private: where the stock is kept. */
+  warehouseLocation?: string;
+  catalogStatus?: CatalogStatus;
   specs?: Record<string, string>;
   variants: ProductVariant[];
   createdAt: number;

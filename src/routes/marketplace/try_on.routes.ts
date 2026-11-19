@@ -7,16 +7,17 @@ import { externalVtonService } from '../../infrastructure/vton_api.js';
 import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
 
 /**
- * Brands can upload a clear, flat "AI reference image" per product (stored under the reserved
- * specs key `_aiReferenceImage`). When the client sends the product's normal display photo (or none),
+ * Brands can upload a clear, flat "AI reference image" per product (the `aiReferenceImage` field). When the client sends the product's normal display photo (or none),
  * the AI model gets the reference image instead, so it can understand the real garment.
  */
-function resolveGarmentImage(productId: unknown, requested: unknown): string {
+export function resolveGarmentImage(productId: unknown, requested: unknown): string {
   const requestedUrl = typeof requested === 'string' ? requested : '';
   if (typeof productId !== 'string' || !productId) return requestedUrl;
   try {
     const product = db.getProductById(productId);
-    const reference = (product?.specs as Record<string, string> | undefined)?._aiReferenceImage;
+    // Dedicated field first; older products saved it under the reserved specs key.
+    const reference =
+      product?.aiReferenceImage || (product?.specs as Record<string, string> | undefined)?._aiReferenceImage;
     if (reference && (!requestedUrl || (product?.images || []).includes(requestedUrl))) {
       return reference;
     }
