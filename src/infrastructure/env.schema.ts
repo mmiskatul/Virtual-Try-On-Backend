@@ -23,7 +23,11 @@ const envSchema = z.object({
   REDIS_URL: z.string().optional().default(''),
   AI_SERVICE_URL: z.string().url().default('http://localhost:8000'),
   INTERNAL_SERVICE_KEY: z.string().optional().default(''),
-  PUBLIC_BACKEND_URL: z.string().optional().default('http://localhost:4000'),
+  // Own public address (used for signed storage URLs). Not needed in .env: official domain in production, localhost otherwise.
+  PUBLIC_BACKEND_URL: z
+    .string()
+    .optional()
+    .default(process.env.NODE_ENV === 'production' ? 'https://api.vtrystudio.com' : 'http://localhost:4000'),
 
   // Storage & AI Providers
   STORAGE_DRIVER: z.enum(['auto', 'supabase', 'local']).default('auto'),

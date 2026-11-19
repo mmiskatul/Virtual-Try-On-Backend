@@ -117,7 +117,18 @@ export const config = {
   resendFrom: (process.env.RESEND_FROM || 'V-TRY Studio <onboarding@resend.dev>').trim(),
 
   // Default Frontend Portal Origins (for email links)
-  marketplaceUrl: (process.env.MARKETPLACE_URL || 'http://localhost:3000').trim(),
-  brandDashboardUrl: (process.env.BRAND_DASHBOARD_URL || 'http://localhost:3001').trim(),
-  superAdminUrl: (process.env.SUPER_ADMIN_URL || 'http://localhost:3002').trim(),
+  // Frontend URLs are not configured in .env: production uses the official domains, local dev uses localhost.
+  // (Optional env overrides remain supported for staging.)
+  marketplaceUrl: (
+    process.env.MARKETPLACE_URL ||
+    (process.env.NODE_ENV === 'production' ? 'https://vtrystudio.com' : 'http://localhost:3000')
+  ).trim(),
+  brandDashboardUrl: (
+    process.env.BRAND_DASHBOARD_URL ||
+    (process.env.NODE_ENV === 'production' ? 'https://shop.brand.vtrystudio.com' : 'http://localhost:3001')
+  ).trim(),
+  superAdminUrl: (
+    process.env.SUPER_ADMIN_URL ||
+    (process.env.NODE_ENV === 'production' ? 'https://admin.vtrystudio.com' : 'http://localhost:3002')
+  ).trim(),
 };
