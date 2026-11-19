@@ -163,6 +163,10 @@ export const ProductVariantInputSchema = z.object({
   color: z.string().trim().min(1, 'Colour is required.').max(PRODUCT_LIMITS.variantColorMax),
   stockQuantity: stockField,
   available: z.boolean(),
+  /** Price for this size. Leave out to use the product price. */
+  price: priceField.optional(),
+  /** Photo of this colour. */
+  imageUrl: SafeImageAssetSchema.optional(),
 });
 
 const variantsField = z
@@ -182,6 +186,22 @@ const variantsField = z
         ctx.addIssue({ code: 'custom', path: [index, 'sku'], message: `Variant SKU ${variant.sku} is used twice.` });
       }
       seenSkus.add(sku);
+    });
+
+    // One price per size and one photo per colour, whichever colour or size it is combined with.
+    const priceBySize = new Map<string, number | undefined>();
+    const photoByColor = new Map<string, string | undefined>();
+    variants.forEach((variant, index) => {
+      const sizeKey = variant.size.toLowerCase();
+      if (priceBySize.has(sizeKey) && priceBySize.get(sizeKey) !== variant.price) {
+        ctx.addIssue({ code: 'custom', path: [index, 'price'], message: `Size ${variant.size} has two different prices. Use one price per size.` });
+      }
+      priceBySize.set(sizeKey, variant.price);
+      const colorKey = variant.color.toLowerCase();
+      if (photoByColor.has(colorKey) && photoByColor.get(colorKey) !== variant.imageUrl) {
+        ctx.addIssue({ code: 'custom', path: [index, 'imageUrl'], message: `Colour ${variant.color} has two different photos. Use one photo per colour.` });
+      }
+      photoByColor.set(colorKey, variant.imageUrl);
     });
   });
 

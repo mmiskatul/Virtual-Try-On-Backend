@@ -215,6 +215,10 @@ export interface ProductVariant {
   color: string;
   stockQuantity: number;
   available: boolean;
+  /** Price for this size. When missing, the product's own price applies. */
+  price?: number;
+  /** Photo of this colour (the same for every size of that colour). */
+  imageUrl?: string;
 }
 
 export type CatalogStatus = 'ACTIVE' | 'DRAFT' | 'ARCHIVED';

@@ -104,7 +104,9 @@ function validateCartItems(items: any[], couponCode?: unknown): {
       };
     }
 
-    const lineTotal = Number((product.price * item.quantity).toFixed(2));
+    // A size can have its own price; otherwise the product price applies. The server decides, never the cart.
+    const unitPrice = typeof variant.price === 'number' && variant.price > 0 ? variant.price : product.price;
+    const lineTotal = Number((unitPrice * item.quantity).toFixed(2));
     subtotal = Number((subtotal + lineTotal).toFixed(2));
     resolvedItems.push({
       productId: product.id,
@@ -113,7 +115,7 @@ function validateCartItems(items: any[], couponCode?: unknown): {
       size: variant.size,
       color: variant.color,
       quantity: item.quantity,
-      unitPrice: product.price,
+      unitPrice,
       lineTotal,
       imageUrl: product.images[0],
     });

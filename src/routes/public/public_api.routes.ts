@@ -49,7 +49,7 @@ const productView = (p: Product) => ({
   storefrontPublished: p.brandStorefrontPublished,
   marketplacePublished: p.marketplacePublished,
   tryOnEligible: p.isTryOnEligible,
-  variants: p.variants.map((v) => ({ sku: v.sku, size: v.size, color: v.color, stock: v.stockQuantity, available: v.available })),
+  variants: p.variants.map((v) => ({ sku: v.sku, size: v.size, color: v.color, stock: v.stockQuantity, available: v.available, price: v.price ?? p.price, imageUrl: v.imageUrl })),
   updatedAt: p.updatedAt,
 });
 

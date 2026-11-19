@@ -164,6 +164,8 @@ export const ProductVariantSchema = z.object({
   color: z.string().trim().min(1).max(60),
   stockQuantity: z.coerce.number().finite().min(0).max(1_000_000),
   available: z.boolean(),
+  price: z.number().optional(),
+  imageUrl: z.string().optional(),
 });
 
 // ─── OUTPUT SCHEMAS ───────────────────────────────────────────────────────────

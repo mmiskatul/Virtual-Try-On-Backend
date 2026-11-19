@@ -293,6 +293,76 @@ describe('Brand product contract', () => {
     expect(good.statusCode).toBe(200);
   });
 
+  describe('price per size and photo per colour', () => {
+    const photo = (name: string) => `https://example.com/${name}.jpg`;
+    const sizedVariants = () => [
+      { sku: 'PRC-M-BLK', size: 'M', color: 'Black', stockQuantity: 5, available: true, imageUrl: photo('black') },
+      { sku: 'PRC-M-RED', size: 'M', color: 'Red', stockQuantity: 5, available: true, imageUrl: photo('red') },
+      { sku: 'PRC-XL-BLK', size: 'XL', color: 'Black', stockQuantity: 4, available: true, price: 1500, imageUrl: photo('black') },
+      { sku: 'PRC-XL-RED', size: 'XL', color: 'Red', stockQuantity: 6, available: true, price: 1500, imageUrl: photo('red') },
+    ];
+
+    it('saves a price per size and a photo per colour, and shoppers see them', async () => {
+      const res = await create(validBody({ name: 'Sized Shirt', price: 1000, stock: 20, marketplacePublished: true, variants: sizedVariants() }));
+      expect(res.statusCode, res.body).toBe(201);
+      const product = JSON.parse(res.body).product;
+      const byKey = (v: any[], sku: string) => v.find((x) => x.sku === sku);
+      expect(byKey(product.variants, 'PRC-XL-RED').price).toBe(1500);
+      expect(byKey(product.variants, 'PRC-M-RED').price).toBeUndefined();
+      expect(byKey(product.variants, 'PRC-XL-RED').imageUrl).toBe(photo('red'));
+      expect(byKey(product.variants, 'PRC-M-BLK').imageUrl).toBe(photo('black'));
+
+      // Saved: the brand gets the same values back.
+      const saved = await get(product.id);
+      expect(byKey(saved.variants, 'PRC-XL-BLK').price).toBe(1500);
+
+      // The marketplace page exposes the size price and colour photo to shoppers.
+      const app = createApp('all');
+      const detail = await app.inject({ method: 'GET', url: `/api/v1/marketplace/products/${product.id}` });
+      const shown = JSON.parse(detail.body).product;
+      expect(byKey(shown.variants, 'PRC-XL-RED').price).toBe(1500);
+      expect(byKey(shown.variants, 'PRC-M-RED').imageUrl).toBe(photo('red'));
+      await app.close();
+    });
+
+    it('checkout charges the size price, and the product price for sizes without one', async () => {
+      const created = JSON.parse((await create(validBody({ name: 'Priced Shirt', price: 1000, stock: 20, variants: sizedVariants() }))).body).product;
+      const app = createApp('all');
+      const check = async (variantSku: string, quantity: number) => {
+        const res = await app.inject({ method: 'POST', url: '/api/v1/checkout/validate', payload: { items: [{ productId: created.id, variantSku, quantity }] } });
+        expect(res.statusCode, res.body).toBe(200);
+        return JSON.parse(res.body);
+      };
+      expect((await check('PRC-XL-RED', 2)).subtotal).toBe(3000);
+      expect((await check('PRC-M-RED', 2)).subtotal).toBe(2000);
+      await app.close();
+    });
+
+    it('rejects a bad price or photo, and two prices for one size or two photos for one colour', async () => {
+      const bad = async (over: Record<string, unknown>, expectPath: string) => {
+        const variants = sizedVariants().map((v, i) => (i === 3 ? { ...v, ...over } : v));
+        const res = await create(validBody({ stock: 20, variants }));
+        expect(res.statusCode, JSON.stringify(over)).toBe(400);
+        expect(JSON.parse(res.body).issues.some((i: any) => String(i.path).includes(expectPath)), res.body).toBe(true);
+      };
+      await bad({ price: 0 }, 'price');
+      await bad({ price: -5 }, 'price');
+      await bad({ price: 12.345 }, 'price');
+      await bad({ imageUrl: 'javascript:alert(1)' }, 'imageUrl');
+      await bad({ price: 1200 }, 'price'); // XL-Red differs from XL-Black
+      await bad({ imageUrl: photo('other') }, 'imageUrl'); // Red differs between M and XL
+    });
+
+    it('updates keep and clear the size price and colour photo', async () => {
+      const created = JSON.parse((await create(validBody({ name: 'Edit Shirt', price: 1000, stock: 20, variants: sizedVariants() }))).body).product;
+      const cleared = sizedVariants().map(({ price, imageUrl, ...rest }) => rest);
+      const res = await update(created.id, { stock: 20, variants: cleared });
+      expect(res.statusCode, res.body).toBe(200);
+      const saved = await get(created.id);
+      expect(saved.variants.every((v: any) => v.price === undefined && v.imageUrl === undefined)).toBe(true);
+    });
+  });
+
   it('keeps related settings consistent', async () => {
     const draft = JSON.parse(
       (await create(validBody({ catalogStatus: 'DRAFT', brandStorefrontPublished: true, marketplacePublished: true }))).body

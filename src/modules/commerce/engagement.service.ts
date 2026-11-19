@@ -81,9 +81,10 @@ export class CommerceEngagementService {
         name: product.name,
         size: variant?.size || 'M',
         color: variant?.color || 'Default',
-        unitPrice: product.price,
+        // The size's own price when it has one, and that colour's photo.
+        unitPrice: typeof variant?.price === 'number' && variant.price > 0 ? variant.price : product.price,
         quantity: input.quantity,
-        image: product.images?.[0],
+        image: variant?.imageUrl || product.images?.[0],
       });
     }
     memoryCarts.set(userId, list);

@@ -639,7 +639,7 @@ export class CatalogRepository {
             color: v.color,
             stockQuantity: Number(v.stockQuantity ?? 0),
             available: v.available !== false,
-            priceOverride: variantAny.priceOverride != null ? variantAny.priceOverride : null,
+            priceOverride: v.price ?? (variantAny.priceOverride != null ? variantAny.priceOverride : null),
           },
           create: {
             productId: product.id,
@@ -649,7 +649,7 @@ export class CatalogRepository {
             color: v.color,
             stockQuantity: Number(v.stockQuantity ?? 0),
             available: v.available !== false,
-            priceOverride: variantAny.priceOverride != null ? variantAny.priceOverride : null,
+            priceOverride: v.price ?? (variantAny.priceOverride != null ? variantAny.priceOverride : null),
           },
         });
       }
