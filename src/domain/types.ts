@@ -221,6 +221,8 @@ export interface ProductVariant {
   imageUrl?: string;
   /** Brand-private: alert when this size (all colours together) falls below this many pieces. */
   lowStockThreshold?: number;
+  /** Brand-private: clear flat photo of this colour for the AI try-on. Falls back to the product's aiReferenceImage. */
+  aiImageUrl?: string;
 }
 
 export type CatalogStatus = 'ACTIVE' | 'DRAFT' | 'ARCHIVED';

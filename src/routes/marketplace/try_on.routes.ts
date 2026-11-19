@@ -15,6 +15,11 @@ export function resolveGarmentImage(productId: unknown, requested: unknown): str
   if (typeof productId !== 'string' || !productId) return requestedUrl;
   try {
     const product = db.getProductById(productId);
+    // The shopper picked a colour: the colour's own AI photo wins over the product-wide one.
+    const colourAi = requestedUrl
+      ? (product?.variants || []).find((v) => v.imageUrl === requestedUrl && v.aiImageUrl)?.aiImageUrl
+      : undefined;
+    if (colourAi) return colourAi;
     // Dedicated field first; older products saved it under the reserved specs key.
     const reference =
       product?.aiReferenceImage || (product?.specs as Record<string, string> | undefined)?._aiReferenceImage;

@@ -85,7 +85,7 @@ export function toPublicProduct<T extends Partial<Product>>(product: T): T {
   if (Array.isArray(copy.variants)) {
     // The low-stock alert level of a size is brand-private.
     copy.variants = (copy.variants as Array<Record<string, unknown>>).map((variant) => {
-      const { lowStockThreshold: _alert, ...shopperSafe } = variant;
+      const { lowStockThreshold: _alert, aiImageUrl: _ai, ...shopperSafe } = variant;
       return shopperSafe;
     });
   }

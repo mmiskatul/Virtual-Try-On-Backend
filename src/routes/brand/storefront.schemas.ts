@@ -167,6 +167,7 @@ export const ProductVariantSchema = z.object({
   price: z.number().optional(),
   imageUrl: z.string().optional(),
   lowStockThreshold: z.number().int().optional(),
+  aiImageUrl: z.string().optional(),
 });
 
 // ─── OUTPUT SCHEMAS ───────────────────────────────────────────────────────────

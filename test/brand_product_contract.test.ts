@@ -5,6 +5,7 @@ import { createApp } from '../src/server.js';
 import { PRODUCT_LIMITS } from '../src/routes/brand/product.contract.js';
 import { domainEvents } from '../src/infrastructure/domain_events.js';
 import { lowStockSizes } from '../src/domain/low_stock.js';
+import { resolveGarmentImage } from '../src/routes/marketplace/try_on.routes.js';
 import { seedTestUsers } from './helpers.js';
 
 /**
@@ -368,6 +369,55 @@ describe('Brand product contract', () => {
       expect(res.statusCode, res.body).toBe(200);
       const saved = await get(created.id);
       expect(saved.variants.every((v: any) => v.price === undefined && v.imageUrl === undefined)).toBe(true);
+    });
+  });
+
+  describe('AI photo per colour', () => {
+    const shop = (name: string) => `https://example.com/shop-${name}.jpg`;
+    const ai = (name: string) => `https://example.com/ai-${name}.jpg`;
+    const colourVariants = () => [
+      { sku: 'AIC-RED-S', size: 'S', color: 'Red', stockQuantity: 5, available: true, imageUrl: shop('red'), aiImageUrl: ai('red') },
+      { sku: 'AIC-RED-M', size: 'M', color: 'Red', stockQuantity: 5, available: true, imageUrl: shop('red'), aiImageUrl: ai('red') },
+      { sku: 'AIC-NVY-S', size: 'S', color: 'Navy', stockQuantity: 5, available: true, imageUrl: shop('navy') },
+    ];
+
+    it('saves an AI photo per colour for the brand, and never shows it to shoppers', async () => {
+      const res = await create(validBody({ name: 'Colour AI Shirt', stock: 15, marketplacePublished: true, aiReferenceImage: ai('default'), variants: colourVariants() }));
+      expect(res.statusCode, res.body).toBe(201);
+      const product = JSON.parse(res.body).product;
+      expect(product.variants.find((v: any) => v.sku === 'AIC-RED-M').aiImageUrl).toBe(ai('red'));
+      expect(product.variants.find((v: any) => v.sku === 'AIC-NVY-S').aiImageUrl).toBeUndefined();
+      expect((await get(product.id)).variants.find((v: any) => v.sku === 'AIC-RED-S').aiImageUrl).toBe(ai('red'));
+
+      const app = createApp('all');
+      for (const url of [`/api/v1/marketplace/products/${product.id}`, '/api/v1/marketplace/products', '/api/v1/brands/aura-atelier']) {
+        const shopper = await app.inject({ method: 'GET', url });
+        expect(shopper.statusCode, url).toBe(200);
+        expect(shopper.body.includes('aiImageUrl'), `AI photo leaked on ${url}`).toBe(false);
+        expect(shopper.body.includes('ai-red.jpg'), `AI photo link leaked on ${url}`).toBe(false);
+        expect(shopper.body.includes('ai-default.jpg'), `AI default link leaked on ${url}`).toBe(false);
+      }
+      await app.close();
+    });
+
+    it('rejects two AI photos for one colour and an unsafe link', async () => {
+      const twoPhotos = colourVariants().map((v, i) => (i === 1 ? { ...v, aiImageUrl: ai('other') } : v));
+      const res = await create(validBody({ stock: 15, variants: twoPhotos }));
+      expect(res.statusCode).toBe(400);
+      expect(JSON.parse(res.body).issues.some((i: any) => String(i.path).includes('aiImageUrl'))).toBe(true);
+
+      const unsafe = colourVariants().map((v) => (v.color === 'Red' ? { ...v, aiImageUrl: 'javascript:alert(1)' } : v));
+      expect((await create(validBody({ stock: 15, variants: unsafe }))).statusCode).toBe(400);
+    });
+
+    it('the try-on uses the AI photo of the colour the shopper picked', async () => {
+      const created = JSON.parse((await create(validBody({ name: 'Try-On Colours', stock: 15, aiReferenceImage: ai('default'), variants: colourVariants() }))).body).product;
+      // Shopper picked Red: its store photo is sent, and the red AI photo is used.
+      expect(resolveGarmentImage(created.id, shop('red'))).toBe(ai('red'));
+      // Navy has no AI photo of its own: the shopper's photo is kept (it is not the product's main photo).
+      expect(resolveGarmentImage(created.id, shop('navy'))).toBe(shop('navy'));
+      // The product's main photo still maps to the product-wide AI photo.
+      expect(resolveGarmentImage(created.id, 'https://example.com/a.jpg')).toBe('https://example.com/a.jpg');
     });
   });
 
