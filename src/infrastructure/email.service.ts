@@ -1,6 +1,7 @@
 import { Resend } from 'resend';
 import { config } from './config.js';
 import { AuthPortal } from '../domain/types.js';
+import { buildPasswordResetEmail, buildVerificationEmail } from './email_templates.js';
 
 export interface EmailPreviewPayload {
   actionUrl?: string;
@@ -313,37 +314,14 @@ class EmailService {
   }): Promise<EmailSendResult> {
     const meta = getPortalMeta(params.portal, params.requestOrigin);
     const verifyUrl = `${meta.baseUrl}/verify-email?token=${encodeURIComponent(params.rawToken)}&email=${encodeURIComponent(params.to)}`;
-    const safeName = escapeHtml(params.name || 'there');
-
-    const html = `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; background: #0f172a; color: #e2e8f0; border-radius: 16px; padding: 32px; border: 1px solid #1e293b;">
-        <div style="font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: ${meta.accent}; font-weight: 700; margin-bottom: 12px;">
-          ${escapeHtml(meta.title)}
-        </div>
-        <h1 style="font-size: 22px; color: #ffffff; margin: 0 0 12px;">Verify your email address</h1>
-        <p style="font-size: 14px; line-height: 1.6; color: #94a3b8; margin: 0 0 24px;">
-          Hi ${safeName}, please verify your email address to activate your account and sign in securely.
-        </p>
-        <a href="${verifyUrl}" style="display: inline-block; background: ${meta.accent}; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 12px 24px; border-radius: 10px; margin-bottom: 24px;">
-          Verify Email Address
-        </a>
-        <div style="background: #020617; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 20px;">
-          <div style="font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">Or enter your 6-digit verification code</div>
-          <div style="font-size: 26px; font-weight: 800; letter-spacing: 0.25em; color: #ffffff; font-family: monospace;">${params.otpCode}</div>
-        </div>
-        <p style="font-size: 12px; color: #64748b; margin: 0;">
-          This verification link and code expire in ${params.expiresInMinutes} minutes. If you did not create an account, you can safely ignore this email.
-        </p>
-      </div>
-    `;
-
-    const text = [
-      `${meta.title} - Verify your email`,
-      `Hi ${params.name || 'there'},`,
-      `Verify your email by opening: ${verifyUrl}`,
-      `Or enter this 6-digit code: ${params.otpCode}`,
-      `Expires in ${params.expiresInMinutes} minutes.`,
-    ].join('\n\n');
+    const { html, text } = buildVerificationEmail({
+      portalTitle: meta.title,
+      accent: meta.accent,
+      name: params.name,
+      verifyUrl,
+      otpCode: params.otpCode,
+      expiresInMinutes: params.expiresInMinutes,
+    });
 
     return this.dispatch({
       to: params.to,
@@ -369,37 +347,14 @@ class EmailService {
   }): Promise<EmailSendResult> {
     const meta = getPortalMeta(params.portal, params.requestOrigin);
     const resetUrl = `${meta.baseUrl}/reset-password?token=${encodeURIComponent(params.rawToken)}&email=${encodeURIComponent(params.to)}`;
-    const safeName = escapeHtml(params.name || 'there');
-
-    const html = `
-      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; background: #0f172a; color: #e2e8f0; border-radius: 16px; padding: 32px; border: 1px solid #1e293b;">
-        <div style="font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: ${meta.accent}; font-weight: 700; margin-bottom: 12px;">
-          ${escapeHtml(meta.title)}
-        </div>
-        <h1 style="font-size: 22px; color: #ffffff; margin: 0 0 12px;">Reset your password</h1>
-        <p style="font-size: 14px; line-height: 1.6; color: #94a3b8; margin: 0 0 24px;">
-          Hi ${safeName}, we received a request to reset the password for your account. Click the button below or use the reset code to choose a new password.
-        </p>
-        <a href="${resetUrl}" style="display: inline-block; background: ${meta.accent}; color: #ffffff; text-decoration: none; font-weight: 700; font-size: 14px; padding: 12px 24px; border-radius: 10px; margin-bottom: 24px;">
-          Reset Password
-        </a>
-        <div style="background: #020617; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; margin-bottom: 20px;">
-          <div style="font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 6px;">6-digit password reset code</div>
-          <div style="font-size: 26px; font-weight: 800; letter-spacing: 0.25em; color: #ffffff; font-family: monospace;">${params.otpCode}</div>
-        </div>
-        <p style="font-size: 12px; color: #64748b; margin: 0;">
-          This reset link and code expire in ${params.expiresInMinutes} minutes. If you didn't request a password reset, you can safely ignore this message.
-        </p>
-      </div>
-    `;
-
-    const text = [
-      `${meta.title} - Password Reset`,
-      `Hi ${params.name || 'there'},`,
-      `Reset your password by opening: ${resetUrl}`,
-      `Or enter this 6-digit reset code: ${params.otpCode}`,
-      `Expires in ${params.expiresInMinutes} minutes.`,
-    ].join('\n\n');
+    const { html, text } = buildPasswordResetEmail({
+      portalTitle: meta.title,
+      accent: meta.accent,
+      name: params.name,
+      resetUrl,
+      otpCode: params.otpCode,
+      expiresInMinutes: params.expiresInMinutes,
+    });
 
     return this.dispatch({
       to: params.to,
