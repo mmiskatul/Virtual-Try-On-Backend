@@ -171,11 +171,17 @@ function serializeCookie(
     httpOnly?: boolean;
     sameSite?: 'Lax' | 'Strict' | 'None';
     path?: string;
+    host?: string;
   },
 ): string {
   // COOKIE_DOMAIN (e.g. ".vtrystudio.com") lets api.* set cookies that the
   // shop.brand.* / admin.* / apex frontends can read. Unset = host-only (local dev).
-  const cookieDomain = (process.env.COOKIE_DOMAIN || '').trim();
+  // It is only applied when the request host belongs to that domain: browsers reject a cookie whose
+  // Domain doesn't match the host (e.g. localhost), which silently breaks sign-in in local development.
+  const configuredDomain = (process.env.COOKIE_DOMAIN || '').trim();
+  const bare = configuredDomain.replace(/^\./, '').toLowerCase();
+  const host = (options.host || '').split(':')[0].toLowerCase();
+  const cookieDomain = bare && host && (host === bare || host.endsWith(`.${bare}`)) ? configuredDomain : '';
   const parts = [
     `${name}=${encodeURIComponent(value)}`,
     `Path=${options.path || '/'}`,
@@ -226,6 +232,7 @@ export function setPortalAuthCookies(
       httpOnly: true,
       sameSite: 'Lax',
       path: '/',
+      host: request.hostname,
     }),
     serializeCookie(names.refresh, tokens.refreshToken, {
       maxAge: refreshTtlSec,
@@ -233,6 +240,7 @@ export function setPortalAuthCookies(
       httpOnly: true,
       sameSite: 'Lax',
       path: '/',
+      host: request.hostname,
     }),
     serializeCookie(names.session, tokens.sessionId, {
       maxAge: refreshTtlSec,
@@ -240,6 +248,7 @@ export function setPortalAuthCookies(
       httpOnly: true,
       sameSite: 'Lax',
       path: '/',
+      host: request.hostname,
     }),
   ]);
 }
@@ -253,9 +262,9 @@ export function clearPortalAuthCookies(
   const secure = shouldUseSecureCookie(request);
 
   appendSetCookies(reply, [
-    serializeCookie(names.access, '', { maxAge: 0, secure, httpOnly: true, sameSite: 'Lax', path: '/' }),
-    serializeCookie(names.refresh, '', { maxAge: 0, secure, httpOnly: true, sameSite: 'Lax', path: '/' }),
-    serializeCookie(names.session, '', { maxAge: 0, secure, httpOnly: true, sameSite: 'Lax', path: '/' }),
+    serializeCookie(names.access, '', { maxAge: 0, secure, httpOnly: true, sameSite: 'Lax', path: '/', host: request.hostname }),
+    serializeCookie(names.refresh, '', { maxAge: 0, secure, httpOnly: true, sameSite: 'Lax', path: '/', host: request.hostname }),
+    serializeCookie(names.session, '', { maxAge: 0, secure, httpOnly: true, sameSite: 'Lax', path: '/', host: request.hostname }),
   ]);
 }
 
