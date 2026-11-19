@@ -129,11 +129,11 @@ export async function brandAuthRoutes(app: FastifyInstance) {
     if (!mailResult.delivered) {
       db.deleteUser(user.id);
       db.deleteTenant(tenant.id);
+      // Provider error details stay in server logs; clients only get a generic message.
       return reply.status(502).send({
         error: 'EmailDeliveryFailed',
-        message: mailResult.error
-          ? `Verification email could not be sent: ${mailResult.error}`
-          : 'Verification email could not be sent right now. Please try again shortly.',
+        status: 'VERIFICATION_NOT_SENT',
+        message: 'Verification email could not be sent right now. Please try again shortly.',
       });
     }
 
@@ -148,7 +148,8 @@ export async function brandAuthRoutes(app: FastifyInstance) {
     });
 
     return reply.status(201).send({
-      message: 'Brand registered! Please verify your email address before signing in.',
+      message: 'Brand registered! A verification code has been sent to your email.',
+      status: 'VERIFICATION_SENT',
       requiresEmailVerification: true,
       user: sanitizePublicUser(user),
       tenant,

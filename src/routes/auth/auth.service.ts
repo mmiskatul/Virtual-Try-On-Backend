@@ -29,7 +29,8 @@ export function normalizeEmail(email: string): string {
 }
 
 export function isValidEmail(email: string): boolean {
-  return EMAIL_REGEX.test(email.trim());
+  const value = email.trim();
+  return value.length <= 254 && /^[\x21-\x7E]+$/.test(value) && !value.includes('..') && EMAIL_REGEX.test(value);
 }
 
 export function validateStrongPassword(password: string): string | null {
@@ -38,6 +39,9 @@ export function validateStrongPassword(password: string): string | null {
   }
   if (password.length > 128) {
     return 'Password cannot exceed 128 characters.';
+  }
+  if (!/^[\x21-\x7E]+$/.test(password)) {
+    return 'Password can only contain letters, numbers and symbols (no spaces or emoji).';
   }
   if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) {
     return 'Password must include at least one letter and one number.';
@@ -400,12 +404,14 @@ export function registerSharedAuthRoutes(
     const user = db.getUserByEmail(email);
     if (!user) {
       return {
+        status: 'REQUEST_ACCEPTED',
         message: 'If your account exists and is pending verification, a verification email has been sent.',
       };
     }
 
     if (user.emailVerified) {
       return {
+        status: 'ALREADY_VERIFIED',
         message: 'Your email address is already verified. You can sign in now.',
         alreadyVerified: true,
       };
@@ -425,14 +431,14 @@ export function registerSharedAuthRoutes(
     if (!mailResult.delivered) {
       return reply.status(502).send({
         error: 'EmailDeliveryFailed',
-        message: mailResult.error
-          ? `We could not send the verification email: ${mailResult.error}`
-          : 'We could not send the verification email right now. Please try again shortly.',
+        status: 'VERIFICATION_NOT_SENT',
+        message: 'We could not send the verification email right now. Please try again shortly.',
       });
     }
 
     return {
-      message: 'Verification email sent! Check your inbox for the verification link or 6-digit code.',
+      status: 'VERIFICATION_SENT',
+      message: 'Verification code sent to your email. Check your inbox.',
     };
   });
 
