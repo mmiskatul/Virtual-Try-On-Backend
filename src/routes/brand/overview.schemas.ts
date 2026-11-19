@@ -130,6 +130,10 @@ export const OverviewSummaryResponseSchema = z.object({
       sku: z.string(),
       stock: z.number().int().nonnegative(),
       lowStockThreshold: z.number().int().nonnegative(),
+      /** Sizes below the alert level the brand set for them. */
+      lowSizes: z
+        .array(z.object({ size: z.string(), stock: z.number().int().nonnegative(), threshold: z.number().int().nonnegative() }))
+        .default([]),
     })
   ),
   recentOrders: z.array(

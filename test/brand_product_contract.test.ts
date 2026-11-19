@@ -3,12 +3,20 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { db } from '../src/infrastructure/database.js';
 import { createApp } from '../src/server.js';
 import { PRODUCT_LIMITS } from '../src/routes/brand/product.contract.js';
+import { domainEvents } from '../src/infrastructure/domain_events.js';
+import { lowStockSizes } from '../src/domain/low_stock.js';
 import { seedTestUsers } from './helpers.js';
 
 /**
  * The product contract: every field the dashboard's Add Product form sends has one fixed type and limit.
  * Valid values are accepted and saved; invalid values are rejected with a 400 naming the field.
  */
+const unwrapOverview = (body: string): any[] => {
+  const parsed = JSON.parse(body);
+  const data = parsed?.data ?? parsed;
+  return data?.lowStockProducts ?? data?.data?.lowStockProducts ?? [];
+};
+
 describe('Brand product contract', () => {
   let token = '';
   let counter = 0;
@@ -360,6 +368,103 @@ describe('Brand product contract', () => {
       expect(res.statusCode, res.body).toBe(200);
       const saved = await get(created.id);
       expect(saved.variants.every((v: any) => v.price === undefined && v.imageUrl === undefined)).toBe(true);
+    });
+  });
+
+  describe('low-stock alert per size', () => {
+    // M = 8 pieces (alert at 10 -> low), XL = 20 pieces (alert at 5 -> fine), plus a size with no alert of its own.
+    const alertVariants = () => [
+      { sku: 'ALR-M-BLK', size: 'M', color: 'Black', stockQuantity: 5, available: true, lowStockThreshold: 10 },
+      { sku: 'ALR-M-RED', size: 'M', color: 'Red', stockQuantity: 3, available: true, lowStockThreshold: 10 },
+      { sku: 'ALR-XL-BLK', size: 'XL', color: 'Black', stockQuantity: 12, available: true, lowStockThreshold: 5 },
+      { sku: 'ALR-XL-RED', size: 'XL', color: 'Red', stockQuantity: 8, available: true, lowStockThreshold: 5 },
+      { sku: 'ALR-S-BLK', size: 'S', color: 'Black', stockQuantity: 2, available: true },
+    ];
+
+    it('saves an alert level per size, shows it to the brand and hides it from shoppers', async () => {
+      const res = await create(validBody({ name: 'Alert Shirt', stock: 30, marketplacePublished: true, variants: alertVariants() }));
+      expect(res.statusCode, res.body).toBe(201);
+      const product = JSON.parse(res.body).product;
+      expect(product.variants.find((v: any) => v.sku === 'ALR-M-RED').lowStockThreshold).toBe(10);
+      expect(product.variants.find((v: any) => v.sku === 'ALR-S-BLK').lowStockThreshold).toBeUndefined();
+      expect((await get(product.id)).variants.find((v: any) => v.sku === 'ALR-XL-BLK').lowStockThreshold).toBe(5);
+
+      const app = createApp('all');
+      for (const url of [`/api/v1/marketplace/products/${product.id}`, '/api/v1/marketplace/products', '/api/v1/brands/aura-atelier']) {
+        const shopper = await app.inject({ method: 'GET', url });
+        expect(shopper.statusCode, url).toBe(200);
+        expect(shopper.body.includes('lowStockThreshold'), `alert level leaked on ${url}`).toBe(false);
+      }
+      await app.close();
+    });
+
+    it('rejects a bad alert level, and two levels for one size', async () => {
+      const bad = async (over: Record<string, unknown>) => {
+        const variants = alertVariants().map((v, i) => (i === 1 ? { ...v, ...over } : v));
+        const res = await create(validBody({ stock: 30, variants }));
+        expect(res.statusCode, JSON.stringify(over)).toBe(400);
+        expect(JSON.parse(res.body).issues.some((i: any) => String(i.path).startsWith('variants')), res.body).toBe(true);
+      };
+      await bad({ lowStockThreshold: -1 });
+      await bad({ lowStockThreshold: 2.5 });
+      await bad({ lowStockThreshold: PRODUCT_LIMITS.lowStockMax + 1 });
+      await bad({ lowStockThreshold: 20 }); // M-Red differs from M-Black
+    });
+
+    it('finds the sizes that are below their alert level', () => {
+      const low = lowStockSizes({ variants: alertVariants().map((v) => ({ id: v.sku, ...v })) as any });
+      expect(low).toEqual([{ size: 'M', stock: 8, threshold: 10 }]);
+      expect(lowStockSizes({ variants: [{ id: 'a', sku: 'a', size: 'S', color: 'Red', stockQuantity: 0, available: false }] as any })).toEqual([]);
+    });
+
+    it('warns in the brand analytics and the overview, per size', async () => {
+      const created = JSON.parse((await create(validBody({ name: 'Warn Shirt', stock: 30, variants: alertVariants() }))).body).product;
+      const app = createApp('all');
+
+      const analytics = await app.inject({ method: 'GET', url: '/api/v1/brand/analytics', headers: auth() });
+      expect(analytics.statusCode).toBe(200);
+      const warnings = JSON.parse(analytics.body).lowStockWarnings.filter((w: any) => w.productName === 'Warn Shirt');
+      // M is judged as a whole size; XL is fine; S has no alert of its own so the standard per-variant alert applies.
+      expect(warnings.find((w: any) => w.size === 'M')).toMatchObject({ color: 'All colours', stock: 8 });
+      expect(warnings.find((w: any) => w.size === 'XL')).toBeUndefined();
+      expect(warnings.find((w: any) => w.size === 'S')).toMatchObject({ sku: 'ALR-S-BLK', stock: 2 });
+      expect(warnings.filter((w: any) => w.size === 'M')).toHaveLength(1);
+
+      const overview = await app.inject({ method: 'GET', url: '/api/v1/brand/overview', headers: auth() });
+      expect(overview.statusCode, overview.body.slice(0, 200)).toBe(200);
+      const entry = unwrapOverview(overview.body).find((p: any) => p.id === created.id);
+      expect(entry?.lowSizes).toEqual([{ size: 'M', stock: 8, threshold: 10 }]);
+      await app.close();
+    });
+
+    it('fires the low-stock event when a size (all colours) drops below its level', () => {
+      const events: any[] = [];
+      const listener = (e: any) => events.push(e);
+      domainEvents.on('inventory.low_stock', listener);
+      try {
+        const now = Date.now();
+        const product = db.createProduct({
+          id: 'prod_alert_evt', tenantId: 'tenant_aura', name: 'Event Shirt', slug: 'event-shirt', description: '', category: 'Shirts',
+          sku: 'EVT-1', price: 10, images: [], fabricIds: [], tags: [], brandStorefrontPublished: false, marketplacePublished: false,
+          isTryOnEligible: false, tryOnCategory: 'tops', createdAt: now, updatedAt: now,
+          variants: [
+            { id: 'v1', sku: 'EVT-L-A', size: 'L', color: 'Black', stockQuantity: 6, available: true, lowStockThreshold: 10 },
+            { id: 'v2', sku: 'EVT-L-B', size: 'L', color: 'Red', stockQuantity: 6, available: true, lowStockThreshold: 10 },
+          ],
+        } as any);
+        // 12 in total. Selling 1 -> 11, still at or above 10: no event.
+        db.adjustInventory(product.tenantId, product.id, 'EVT-L-A', -1, 'sale');
+        expect(events).toHaveLength(0);
+        // 11 -> 9: crosses below 10: one event carrying the size total.
+        db.adjustInventory(product.tenantId, product.id, 'EVT-L-B', -2, 'sale');
+        expect(events).toHaveLength(1);
+        expect(events[0]).toMatchObject({ productId: 'prod_alert_evt', stock: 9 });
+        // Already low: selling more does not fire again.
+        db.adjustInventory(product.tenantId, product.id, 'EVT-L-A', -1, 'sale');
+        expect(events).toHaveLength(1);
+      } finally {
+        domainEvents.off('inventory.low_stock', listener);
+      }
     });
   });
 

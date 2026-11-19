@@ -167,6 +167,8 @@ export const ProductVariantInputSchema = z.object({
   price: priceField.optional(),
   /** Photo of this colour. */
   imageUrl: SafeImageAssetSchema.optional(),
+  /** Alert when this size (all colours together) falls below this many pieces. Leave out for no size alert. */
+  lowStockThreshold: lowStockField.optional(),
 });
 
 const variantsField = z
@@ -188,8 +190,9 @@ const variantsField = z
       seenSkus.add(sku);
     });
 
-    // One price per size and one photo per colour, whichever colour or size it is combined with.
+    // One price and one alert level per size, and one photo per colour, whichever colour or size it is combined with.
     const priceBySize = new Map<string, number | undefined>();
+    const alertBySize = new Map<string, number | undefined>();
     const photoByColor = new Map<string, string | undefined>();
     variants.forEach((variant, index) => {
       const sizeKey = variant.size.toLowerCase();
@@ -197,6 +200,10 @@ const variantsField = z
         ctx.addIssue({ code: 'custom', path: [index, 'price'], message: `Size ${variant.size} has two different prices. Use one price per size.` });
       }
       priceBySize.set(sizeKey, variant.price);
+      if (alertBySize.has(sizeKey) && alertBySize.get(sizeKey) !== variant.lowStockThreshold) {
+        ctx.addIssue({ code: 'custom', path: [index, 'lowStockThreshold'], message: `Size ${variant.size} has two different low-stock alerts. Use one alert per size.` });
+      }
+      alertBySize.set(sizeKey, variant.lowStockThreshold);
       const colorKey = variant.color.toLowerCase();
       if (photoByColor.has(colorKey) && photoByColor.get(colorKey) !== variant.imageUrl) {
         ctx.addIssue({ code: 'custom', path: [index, 'imageUrl'], message: `Colour ${variant.color} has two different photos. Use one photo per colour.` });

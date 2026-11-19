@@ -219,6 +219,8 @@ export interface ProductVariant {
   price?: number;
   /** Photo of this colour (the same for every size of that colour). */
   imageUrl?: string;
+  /** Brand-private: alert when this size (all colours together) falls below this many pieces. */
+  lowStockThreshold?: number;
 }
 
 export type CatalogStatus = 'ACTIVE' | 'DRAFT' | 'ARCHIVED';

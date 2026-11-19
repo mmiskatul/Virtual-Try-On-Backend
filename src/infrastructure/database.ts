@@ -1,5 +1,6 @@
 import { domainEvents } from './domain_events.js';
 import { toPublicProduct } from '../domain/product_meta.js';
+import { sizeAlertLevel, sizeStockTotals } from '../domain/low_stock.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -1015,10 +1016,18 @@ export class Database {
     }
 
     const previousStock = variant.stockQuantity;
+    const sizeAlert = sizeAlertLevel(product, variant.size);
+    const sizeTotalBefore = sizeStockTotals(product).get(variant.size) ?? 0;
     variant.stockQuantity = nextStock;
     variant.available = nextStock > 0;
     product.updatedAt = Date.now();
-    if (previousStock > LOW_STOCK_THRESHOLD && nextStock <= LOW_STOCK_THRESHOLD) {
+    if (sizeAlert !== undefined) {
+      // The brand set an alert for this size: it fires when the whole size (all colours) drops below it.
+      const sizeTotalAfter = sizeTotalBefore + change;
+      if (sizeTotalBefore >= sizeAlert && sizeTotalAfter < sizeAlert) {
+        domainEvents.emitSafe('inventory.low_stock', { tenantId, productId, productName: product.name, variantSku, stock: sizeTotalAfter });
+      }
+    } else if (previousStock > LOW_STOCK_THRESHOLD && nextStock <= LOW_STOCK_THRESHOLD) {
       domainEvents.emitSafe('inventory.low_stock', { tenantId, productId, productName: product.name, variantSku, stock: nextStock });
     }
 

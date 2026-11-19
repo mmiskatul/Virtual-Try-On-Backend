@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
+import { lowStockSizes } from '../../domain/low_stock.js';
 import { db } from '../../infrastructure/database.js';
 import {
   createAdminMiddleware,
@@ -93,15 +94,28 @@ export async function brandStorefrontRoutes(app: FastifyInstance) {
       .filter(o => o.paymentStatus === 'PAID')
       .reduce((sum, o) => sum + o.totalAmount, 0);
 
-    const lowStockVariants = products.flatMap(p =>
-      p.variants.filter(v => v.stockQuantity < 5).map(v => ({
+    const lowStockVariants = products.flatMap(p => {
+      // Sizes with their own alert level are judged on the whole size (all colours together)...
+      const sizesWithAlert = new Set(p.variants.filter(v => typeof v.lowStockThreshold === 'number').map(v => v.size));
+      const bySize = lowStockSizes(p).map(s => ({
         productName: p.name,
-        sku: v.sku,
-        size: v.size,
-        color: v.color,
-        stock: v.stockQuantity
-      }))
-    );
+        sku: p.sku,
+        size: s.size,
+        color: 'All colours',
+        stock: s.stock
+      }));
+      // ...and every other variant keeps the standard alert.
+      const byVariant = p.variants
+        .filter(v => !sizesWithAlert.has(v.size) && v.stockQuantity < 5)
+        .map(v => ({
+          productName: p.name,
+          sku: v.sku,
+          size: v.size,
+          color: v.color,
+          stock: v.stockQuantity
+        }));
+      return [...bySize, ...byVariant];
+    });
 
     return validateZodOutput(
       BrandAnalyticsResponseSchema,

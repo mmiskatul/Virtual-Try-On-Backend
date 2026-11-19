@@ -82,6 +82,13 @@ const PRIVATE_PRODUCT_KEYS = [
 export function toPublicProduct<T extends Partial<Product>>(product: T): T {
   const copy: Record<string, unknown> = { ...product };
   for (const key of PRIVATE_PRODUCT_KEYS) delete copy[key];
+  if (Array.isArray(copy.variants)) {
+    // The low-stock alert level of a size is brand-private.
+    copy.variants = (copy.variants as Array<Record<string, unknown>>).map((variant) => {
+      const { lowStockThreshold: _alert, ...shopperSafe } = variant;
+      return shopperSafe;
+    });
+  }
   if (copy.specs && typeof copy.specs === 'object') {
     copy.specs = Object.fromEntries(
       Object.entries(copy.specs as Record<string, string>).filter(([key]) => !key.startsWith('_'))

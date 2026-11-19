@@ -271,6 +271,7 @@ async function createBrandProductHandler(
           available: v.available,
           ...(v.price !== undefined ? { price: v.price } : {}),
           ...(v.imageUrl ? { imageUrl: v.imageUrl } : {}),
+          ...(v.lowStockThreshold !== undefined ? { lowStockThreshold: v.lowStockThreshold } : {}),
         }))
       : buildDefaultVariants(sku, body.stock);
 
@@ -746,6 +747,7 @@ export async function brandProductRoutes(app: FastifyInstance) {
         available: v.available,
         ...(v.price !== undefined ? { price: v.price } : {}),
         ...(v.imageUrl ? { imageUrl: v.imageUrl } : {}),
+        ...(v.lowStockThreshold !== undefined ? { lowStockThreshold: v.lowStockThreshold } : {}),
       }));
     } else if (body.stock !== undefined) {
       const currentVariants = [...(existing.variants || [])];

@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { lowStockSizes } from '../../domain/low_stock.js';
 import { db } from '../../infrastructure/database.js';
 import { createBrandMiddleware } from '../../infrastructure/auth.guard.js';
 import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
@@ -434,6 +435,7 @@ export async function brandOverviewRoutes(app: FastifyInstance) {
         price: Number(p.price) || 0,
         stock: getProductStock(p),
         lowStockThreshold: p.lowStockThreshold ?? LOW_STOCK_THRESHOLD,
+        lowSizes: lowStockSizes(p),
         salesCount: salesByProduct.get(p.id) || 0,
         image: p.images?.[0] || FALLBACK_PRODUCT_IMAGE,
       }));
@@ -443,14 +445,15 @@ export async function brandOverviewRoutes(app: FastifyInstance) {
         .slice(0, 4);
 
       const lowStockProducts = enrichedProducts
-        .filter((p) => p.stock < p.lowStockThreshold)
+        .filter((p) => p.stock < p.lowStockThreshold || p.lowSizes.length > 0)
         .slice(0, 6)
-        .map(({ id, name, sku, stock, lowStockThreshold }) => ({
+        .map(({ id, name, sku, stock, lowStockThreshold, lowSizes }) => ({
           id,
           name,
           sku,
           stock,
           lowStockThreshold,
+          lowSizes,
         }));
 
       const recentOrders = [...orders]
