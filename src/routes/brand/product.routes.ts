@@ -146,6 +146,18 @@ function normalizeTryOnCategory(raw?: string): Product['tryOnCategory'] {
   return 'tops';
 }
 
+// Starter collections offered in the add-product form until the brand creates its own.
+const DEFAULT_COLLECTIONS = [
+  'New Arrivals',
+  'Best Sellers',
+  'Summer Collection',
+  'Winter Collection',
+  'Eid Collection',
+  'Party Wear',
+  'Casual Everyday',
+  'Sale',
+];
+
 const DEFAULT_APPAREL_CATEGORIES = [
   'Dresses',
   'Tops',
@@ -337,6 +349,7 @@ export async function brandProductRoutes(app: FastifyInstance) {
 
     const collections = Array.from(
       new Set([
+        ...(colList.length > 0 ? [] : DEFAULT_COLLECTIONS),
         ...colList.map((c) => c.title),
         ...tenantProducts.map((p) => p.collection).filter((c): c is string => Boolean(c)),
       ])
