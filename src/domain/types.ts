@@ -123,8 +123,16 @@ export interface WebhookEndpointRecord {
   disabledReason?: string;
 }
 
+/** Store settings a brand controls (see modules/commerce/store_settings.ts). */
+export interface StoreSettings {
+  open: boolean;
+  shipping: { defaultFee: number; freeOver: number | null };
+  seo: { title: string; description: string };
+}
+
 export interface StorefrontSettings {
   tryOn?: TryOnSettings;
+  store?: StoreSettings;
   apiKeys?: ApiKeyRecord[];
   webhooks?: WebhookEndpointRecord[];
   discounts?: DiscountRecord[];
