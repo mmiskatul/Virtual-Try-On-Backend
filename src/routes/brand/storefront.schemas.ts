@@ -305,6 +305,7 @@ export const ProductOutputSchema = z
     marketplacePublished: z.boolean(),
     isTryOnEligible: z.boolean(),
     tryOnCategory: z.string(),
+    audience: z.enum(['WOMEN', 'MEN', 'UNISEX']).optional(),
     specs: z.record(z.string(), z.string()).optional(),
     variants: z.array(ProductVariantSchema),
     moderationStatus: z.string().optional(),

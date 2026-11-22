@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PRODUCT_AUDIENCES } from '../../domain/types.js';
 import {
   NormalizedCurrencyInputSchema,
   ProductOutputSchema,
@@ -140,6 +141,8 @@ const warehouseField = z
 const tryOnCategoryField = z.enum(TRY_ON_CATEGORIES, {
   error: `Try-On category must be one of: ${TRY_ON_CATEGORIES.join(', ')}.`,
 });
+const audienceField = z.enum(PRODUCT_AUDIENCES, { message: 'Choose who this is for: women, men or both.' });
+
 const catalogStatusField = z.enum(CATALOG_STATUSES, {
   error: `Catalog status must be one of: ${CATALOG_STATUSES.join(', ')}.`,
 });
@@ -250,6 +253,7 @@ const writableShape = {
   includeInMarketplaceTryOn: z.boolean(),
   tryOnCategory: tryOnCategoryField,
   catalogStatus: catalogStatusField,
+  audience: audienceField,
   specs: specsField,
   fabricIds: z.array(z.string().trim().min(1).max(120)).max(24),
 } as const;
@@ -312,6 +316,7 @@ export const CreateProductInputSchema = z
     includeInMarketplaceTryOn: writableShape.includeInMarketplaceTryOn.optional(),
     tryOnCategory: writableShape.tryOnCategory.optional(),
     catalogStatus: writableShape.catalogStatus.optional(),
+    audience: writableShape.audience.optional(),
     specs: writableShape.specs.optional(),
     fabricIds: writableShape.fabricIds.optional(),
   })
@@ -345,6 +350,7 @@ export const UpdateProductInputSchema = z
     includeInMarketplaceTryOn: writableShape.includeInMarketplaceTryOn.optional(),
     tryOnCategory: writableShape.tryOnCategory.optional(),
     catalogStatus: writableShape.catalogStatus.optional(),
+    audience: writableShape.audience.optional(),
     specs: writableShape.specs.optional(),
     fabricIds: writableShape.fabricIds.optional(),
   })
@@ -362,6 +368,7 @@ export const BrandProductOutputSchema = ProductOutputSchema.extend({
   catalogStatus: z.enum(CATALOG_STATUSES).optional(),
   includeInBrandTryOn: z.boolean().optional(),
   includeInMarketplaceTryOn: z.boolean().optional(),
+  audience: z.enum(PRODUCT_AUDIENCES).optional(),
   aiReferenceImage: z.string().optional(),
   costPrice: z.number().optional(),
   lowStockThreshold: z.number().int().optional(),

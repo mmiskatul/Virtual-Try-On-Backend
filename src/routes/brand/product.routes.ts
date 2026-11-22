@@ -302,6 +302,7 @@ async function createBrandProductHandler(
     lowStockThreshold: body.lowStockThreshold ?? DEFAULT_LOW_STOCK_THRESHOLD,
     warehouseLocation: body.warehouseLocation || undefined,
     catalogStatus: body.catalogStatus ?? 'ACTIVE',
+    audience: body.audience ?? 'UNISEX',
     includeInBrandTryOn: body.includeInBrandTryOn ?? true,
     includeInMarketplaceTryOn: body.includeInMarketplaceTryOn ?? false,
     specs: body.specs || {},
@@ -727,6 +728,7 @@ export async function brandProductRoutes(app: FastifyInstance) {
     if (body.lowStockThreshold !== undefined) safeUpdates.lowStockThreshold = body.lowStockThreshold;
     if (body.warehouseLocation !== undefined) safeUpdates.warehouseLocation = body.warehouseLocation || undefined;
     if (body.catalogStatus !== undefined) safeUpdates.catalogStatus = body.catalogStatus;
+    if (body.audience !== undefined) safeUpdates.audience = body.audience;
     if (body.includeInBrandTryOn !== undefined) safeUpdates.includeInBrandTryOn = body.includeInBrandTryOn;
     if (body.includeInMarketplaceTryOn !== undefined) safeUpdates.includeInMarketplaceTryOn = body.includeInMarketplaceTryOn;
 

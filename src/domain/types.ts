@@ -243,6 +243,10 @@ export interface ProductVariant {
 
 export type CatalogStatus = 'ACTIVE' | 'DRAFT' | 'ARCHIVED';
 
+/** Who a garment is made for. UNISEX means both men and women. */
+export const PRODUCT_AUDIENCES = ['WOMEN', 'MEN', 'UNISEX'] as const;
+export type ProductAudience = (typeof PRODUCT_AUDIENCES)[number];
+
 export interface Product {
   id: string;
   tenantId: string;
@@ -277,6 +281,8 @@ export interface Product {
   /** Brand-private: where the stock is kept. */
   warehouseLocation?: string;
   catalogStatus?: CatalogStatus;
+  /** Who this garment is for: women, men, or both. Older products without a value count as both. */
+  audience?: ProductAudience;
   specs?: Record<string, string>;
   variants: ProductVariant[];
   createdAt: number;

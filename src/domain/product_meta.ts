@@ -1,4 +1,4 @@
-import type { CatalogStatus, Product } from './types.js';
+import type { CatalogStatus, Product, ProductAudience } from './types.js';
 
 /**
  * Product fields that live together in one JSON column (`catalog_meta`) so every database adapter
@@ -13,6 +13,7 @@ export interface ProductMeta {
   lowStockThreshold?: number;
   warehouseLocation?: string;
   catalogStatus?: CatalogStatus;
+  audience?: ProductAudience;
 }
 
 const META_KEYS: Array<keyof ProductMeta> = [
@@ -24,6 +25,7 @@ const META_KEYS: Array<keyof ProductMeta> = [
   'lowStockThreshold',
   'warehouseLocation',
   'catalogStatus',
+  'audience',
 ];
 
 /** True when an update touches any meta field (even to clear it). */
