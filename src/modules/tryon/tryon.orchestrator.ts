@@ -220,6 +220,7 @@ export class TryOnOrchestrator {
     prompt?: string;
     gender?: 'female' | 'male';
     size?: string;
+    garmentSize?: string;
     idempotencyKey?: string;
     correlationId: string;
   }) {
@@ -379,6 +380,7 @@ export class TryOnOrchestrator {
         prompt: input.prompt,
         ...(input.gender ? { gender: input.gender } : {}),
         ...(input.size ? { size: input.size } : {}),
+        ...(input.garmentSize ? { garmentSize: input.garmentSize } : {}),
       },
     });
 

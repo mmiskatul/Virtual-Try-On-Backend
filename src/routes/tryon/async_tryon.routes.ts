@@ -35,6 +35,7 @@ const CreateAsyncJobSchema = z.object({
   // The shopper's gender and usual size, chosen on the try-on page.
   gender: GenderSchema.optional(),
   size: SizeSchema.optional(),
+  garmentSize: SizeSchema.optional(),
   idempotencyKey: z.string().optional(),
 });
 
@@ -100,6 +101,7 @@ export async function asyncTryOnRoutes(app: FastifyInstance) {
       prompt: parsed.data.prompt,
       gender: parsed.data.gender,
       size: parsed.data.size,
+      garmentSize: parsed.data.garmentSize,
       idempotencyKey,
       correlationId: request.correlationId,
     });

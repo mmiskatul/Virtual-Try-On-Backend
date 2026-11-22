@@ -28,6 +28,7 @@ export const TryOnGenerationRequestedV1Schema = z.object({
     // Who is trying it on (checked values only): used so the garment fits the way their size would.
     gender: z.enum(['female', 'male']).optional(),
     size: z.string().max(8).optional(),
+    garmentSize: z.string().max(8).optional(),
   }),
 });
 

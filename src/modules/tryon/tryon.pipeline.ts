@@ -44,7 +44,7 @@ export async function runTryOnPipeline(
       garment,
       category: req.options.category,
       prompt: req.options.prompt,
-      shopper: { gender: req.options.gender, size: req.options.size },
+      shopper: { gender: req.options.gender, size: req.options.size, garmentSize: req.options.garmentSize },
     });
 
     const ext = EXTENSIONS[result.mimeType] || 'png';
