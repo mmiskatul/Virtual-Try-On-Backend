@@ -24,6 +24,7 @@ import {
   startViewAsSession,
 } from '../../modules/tenants/tenant.scope.js';
 import { recordAudit } from '../../modules/audit/audit.service.js';
+import { getTeamAccess, saveTeamAccess } from '../../modules/team/team_access.js';
 
 const ViewAsStartSchema = z.object({
   mode: z.enum(['READ_ONLY', 'SUPPORT_WRITE']).default('READ_ONLY'),
@@ -111,6 +112,11 @@ export async function sessionRbacRoutes(app: FastifyInstance) {
     }
 
     db.updateUser(user.id, { passwordHash: db.hashPassword(newPassword) });
+    // A team member who was given a temporary password is free to continue once they choose their own.
+    if (user.tenantId) {
+      const memberTenant = db.getTenantById(user.tenantId);
+      if (memberTenant && getTeamAccess(memberTenant, user.id).mustChangePassword) saveTeamAccess(memberTenant, user.id, { mustChangePassword: false });
+    }
 
     let revokedOthers = 0;
     for (const s of await listUserSessions(user.id)) {

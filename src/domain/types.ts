@@ -123,6 +123,13 @@ export interface WebhookEndpointRecord {
   disabledReason?: string;
 }
 
+/** Extra access and sign-in state for one team member (see modules/team/team_access.ts). */
+export interface TeamAccessRecord {
+  extraPermissions: string[];
+  mustChangePassword: boolean;
+  disabled: boolean;
+}
+
 /** Store settings a brand controls (see modules/commerce/store_settings.ts). */
 export interface StoreSettings {
   open: boolean;
@@ -133,6 +140,7 @@ export interface StoreSettings {
 export interface StorefrontSettings {
   tryOn?: TryOnSettings;
   store?: StoreSettings;
+  teamAccess?: Record<string, TeamAccessRecord>;
   apiKeys?: ApiKeyRecord[];
   webhooks?: WebhookEndpointRecord[];
   discounts?: DiscountRecord[];

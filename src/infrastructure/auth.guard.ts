@@ -10,6 +10,16 @@ import {
   resolvePermissionsForRoles,
 } from '../modules/rbac/rbac.catalog.js';
 import { ActiveViewAsSession, getActiveViewAsSession, tenantScopeGuard } from '../modules/tenants/tenant.scope.js';
+import { getTeamAccess } from '../modules/team/team_access.js';
+
+/** A team member with a temporary password may only do these until they choose their own password. */
+const PASSWORD_CHANGE_ALLOWED = [
+  '/api/v1/auth/change-password',
+  '/api/v1/auth/rbac/me',
+  '/api/v1/auth/logout',
+  '/api/v1/auth/session',
+  '/api/v1/auth/sessions',
+];
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -208,6 +218,25 @@ export async function authenticateToken(request: FastifyRequest, reply: FastifyR
 
     request.roleCodes = Array.from(roleSet);
     request.permissions = resolvePermissionsForRoles(request.roleCodes);
+
+    // Team members: switched-off people are blocked, and a person can hold extra access beyond their role.
+    if (user.tenantId && BRAND_MEMBER_ROLE_CODES.has(user.role) && user.role !== 'BRAND_OWNER') {
+      const access = getTeamAccess(db.getTenantById(user.tenantId), user.id);
+      if (access.disabled) {
+        return reply.status(403).send({
+          error: 'AccountDisabled',
+          message: 'Your access to this brand has been switched off. Please contact the brand owner.',
+        });
+      }
+      for (const key of access.extraPermissions) request.permissions.add(key);
+      if (access.mustChangePassword && !PASSWORD_CHANGE_ALLOWED.some((p) => request.url.split('?')[0] === p)) {
+        return reply.status(403).send({
+          error: 'PasswordChangeRequired',
+          code: 'PASSWORD_CHANGE_REQUIRED',
+          message: 'Please choose your own password before you continue.',
+        });
+      }
+    }
 
     // Optional audited View-As tenant inspection for Platform Admins
     const viewAsHeader = request.headers['x-view-as-session'];

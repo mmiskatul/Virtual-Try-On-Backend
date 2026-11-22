@@ -38,6 +38,7 @@ type StorefrontTextField = Exclude<
   | 'overviewChecklistIds'
   | 'tryOn'
   | 'store'
+  | 'teamAccess'
   | 'discounts'
   | 'teamInvites'
   | 'apiKeys'

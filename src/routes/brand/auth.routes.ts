@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { getTeamAccess } from '../../modules/team/team_access.js';
 import { loginThrottle } from '../../infrastructure/rate_limiting.js';
 import crypto from 'node:crypto';
 import { db } from '../../infrastructure/database.js';
@@ -363,6 +364,14 @@ export async function brandAuthRoutes(app: FastifyInstance) {
           message: 'Your brand account has been suspended by platform administration.',
         });
       }
+    }
+
+    // A team member whose access was switched off cannot sign in.
+    if (tenant && user.role !== 'BRAND_OWNER' && getTeamAccess(tenant, user.id).disabled) {
+      return reply.status(403).send({
+        error: 'AccountDisabled',
+        message: 'Your access to this brand has been switched off. Please contact the brand owner.',
+      });
     }
 
     if (!user.passwordHash.startsWith('scrypt$')) {
