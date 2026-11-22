@@ -26,6 +26,7 @@ import { brandOverviewRoutes } from './routes/brand/overview.routes.js';
 import { brandTryOnConfigRoutes } from './routes/brand/tryon_config.routes.js';
 import { brandCustomerRoutes } from './routes/brand/customers.routes.js';
 import { brandDiscountRoutes } from './routes/brand/discounts.routes.js';
+import { brandReportRoutes } from './routes/brand/reports.routes.js';
 import { brandTeamRoutes } from './routes/brand/team.routes.js';
 import { brandDeveloperRoutes } from './routes/brand/developer.routes.js';
 import { publicApiRoutes } from './routes/public/public_api.routes.js';
@@ -172,6 +173,7 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
     app.register(brandTryOnConfigRoutes);
     app.register(brandCustomerRoutes);
     app.register(brandDiscountRoutes);
+    app.register(brandReportRoutes);
     app.register(brandTeamRoutes);
     app.register(brandDeveloperRoutes);
     app.register(publicApiRoutes);
