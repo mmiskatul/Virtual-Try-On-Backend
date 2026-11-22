@@ -36,7 +36,7 @@ async function bootstrap() {
 
     console.log(`💾 [Persistence Engine] ${isPrisma ? 'Prisma ORM (PostgreSQL Serverless)' : isSql ? 'Neon PostgreSQL Serverless SQL' : 'Resilient In-Memory + File Snapshot'}`);
     console.log(`🎨 [Cloudinary Storage] ${config.cloudinaryCloudName ? `Connected to '${config.cloudinaryCloudName}'` : 'Local Fallback / Memory'}`);
-    console.log(`🤖 [AI Engine Target]   ${config.aiServiceUrl} (FastAPI)\n`);
+    console.log(`🤖 [Virtual Try-On]     Gemini ${config.geminiApiKey ? 'ready' : 'key missing (set GEMINI_API_KEY)'}\n`);
     console.log('=============================================================\n');
   } catch (err) {
     console.error('❌ Failed to start backend service:', err);

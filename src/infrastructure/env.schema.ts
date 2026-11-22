@@ -21,8 +21,6 @@ const envSchema = z.object({
   // Async infra
   RABBITMQ_URL: z.string().optional().default(''),
   REDIS_URL: z.string().optional().default(''),
-  AI_SERVICE_URL: z.string().url().default('http://localhost:8000'),
-  INTERNAL_SERVICE_KEY: z.string().optional().default(''),
   // Own public address (used for signed storage URLs). Not needed in .env: official domain in production, localhost otherwise.
   PUBLIC_BACKEND_URL: z
     .string()
@@ -33,7 +31,7 @@ const envSchema = z.object({
   STORAGE_DRIVER: z.enum(['auto', 'supabase', 'local']).default('auto'),
   GEMINI_API_KEY: z.string().optional().default(''),
   GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
-  FAL_KEY: z.string().optional().default(''),
+  GEMINI_IMAGE_MODEL: z.string().default('gemini-2.5-flash-image'),
 
   // Resend Email Delivery
   RESEND_API_KEY: z.string().optional().default(''),

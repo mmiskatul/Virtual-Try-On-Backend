@@ -1,11 +1,9 @@
 import { resolveTryOnSettings } from './tryon_settings.js';
 import crypto from 'node:crypto';
-import { aiServiceHeaders } from '../../infrastructure/service_auth.js';
 import { EventEmitter } from 'node:events';
 import { GenerationJob } from '../../domain/types.js';
 import { db } from '../../infrastructure/database.js';
 import { getGlobalPrisma } from '../../infrastructure/prisma.js';
-import { getValidatedEnv } from '../../infrastructure/env.schema.js';
 import { logger } from '../../infrastructure/logger.js';
 import { LogicalBucket, storageAdapter } from '../../infrastructure/storage.adapter.js';
 import {
@@ -17,9 +15,9 @@ import {
   TryOnGenerationRequestedV1Schema,
 } from '../../infrastructure/events.contract.js';
 import { enqueueOutboxEvent } from '../../infrastructure/outbox.js';
-import { rabbitMqBus } from '../../infrastructure/rabbitmq.js';
 import { redisAdapter } from '../../infrastructure/redis.js';
 import { billingCreditService } from '../billing/billing.service.js';
+import { runTryOnPipeline } from './tryon.pipeline.js';
 
 export type ExtendedJobStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 
@@ -52,7 +50,7 @@ const uploadRegistry = new Map<
 
 const asyncJobMeta = new Map<string, AsyncJobMeta>();
 
-// Allows Vitest/unit tests to plug in a mock AI dispatcher or real FastAPI endpoint seamlessly
+// Lets tests plug in a fake picture maker instead of calling Gemini
 export type AiDispatchHandler = (
   event: TryOnGenerationRequestedV1
 ) => Promise<TryOnGenerationCompletedV1 | TryOnGenerationFailedV1>;
@@ -77,14 +75,14 @@ const ALLOWED_IMAGE_TYPES: Record<string, string> = {
   'image/webp': 'webp',
 };
 
-function decodeDataUrl(dataUrl: string): { buffer: Buffer; contentType: string } | null {
+export function decodeDataUrl(dataUrl: string): { buffer: Buffer; contentType: string } | null {
   const match = /^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=]+)$/i.exec(dataUrl.trim());
   if (!match) return null;
   const contentType = match[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : match[1].toLowerCase();
   return { buffer: Buffer.from(match[2], 'base64'), contentType };
 }
 
-async function fetchRemoteImageSafely(urlStr: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+export async function fetchRemoteImageSafely(urlStr: string): Promise<{ buffer: Buffer; contentType: string } | null> {
   try {
     const parsed = new URL(urlStr);
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
@@ -416,14 +414,10 @@ export class TryOnOrchestrator {
       modelKey,
     });
 
-    // Dispatch via RabbitMQ when active, or fallback async HTTP pipeline to Python AI Service
-    if (rabbitMqBus.isConnected()) {
-      void rabbitMqBus.publish('tryon.generation.requested', requestedEvent as unknown as Record<string, unknown>, input.correlationId);
-    } else {
-      setImmediate(() => {
-        void this.dispatchToAiServiceHttp(requestedEvent);
-      });
-    }
+    // The backend creates the picture itself (it calls Gemini), so there is no separate AI service to dispatch to.
+    setImmediate(() => {
+      void this.runGeneration(requestedEvent);
+    });
 
     return {
       ok: true as const,
@@ -438,7 +432,7 @@ export class TryOnOrchestrator {
     void redisAdapter.set(`tryon:status:${jobId}`, JSON.stringify(payload), 300);
   }
 
-  public async dispatchToAiServiceHttp(event: TryOnGenerationRequestedV1): Promise<void> {
+  public async runGeneration(event: TryOnGenerationRequestedV1): Promise<void> {
     const meta = asyncJobMeta.get(event.generationId);
     if (!meta || meta.status === 'CANCELLED') return;
 
@@ -456,21 +450,7 @@ export class TryOnOrchestrator {
       if (customAiDispatcher) {
         rawOutcome = await customAiDispatcher(event);
       } else {
-        const env = getValidatedEnv();
-        const endpoint = `${env.AI_SERVICE_URL.replace(/\/$/, '')}/internal/v1/try-on/execute`;
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: aiServiceHeaders({
-            'Content-Type': 'application/json',
-            'X-Correlation-Id': event.correlationId,
-          }),
-          body: JSON.stringify(event),
-        });
-        if (!res.ok) {
-          const text = await res.text().catch(() => '');
-          throw new Error(`AI Service returned HTTP ${res.status}: ${text}`);
-        }
-        rawOutcome = await res.json();
+        rawOutcome = await runTryOnPipeline(event);
       }
 
       if (rawOutcome?.eventType === 'tryon.generation.completed') {
@@ -480,7 +460,7 @@ export class TryOnOrchestrator {
         const parsed = TryOnGenerationFailedV1Schema.parse(rawOutcome);
         await this.settleOutcome(parsed);
       } else {
-        throw new Error('Malformed outcome payload from AI Service.');
+        throw new Error('Malformed outcome from the try-on pipeline.');
       }
     } catch (err: any) {
       await this.settleOutcome({
@@ -491,8 +471,8 @@ export class TryOnOrchestrator {
         correlationId: event.correlationId,
         generationId: event.generationId,
         error: {
-          code: 'AI_DISPATCH_FAILED',
-          message: err?.message || 'AI pipeline execution failed.',
+          code: 'PIPELINE_ERROR',
+          message: err?.message || 'The try-on could not be created.',
           retryable: true,
         },
         metrics: { totalTimeMs: 0 },

@@ -1,44 +1,30 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
-import { aiServiceHeaders } from '../../infrastructure/service_auth.js';
 import { config } from '../../infrastructure/config.js';
 import { db } from '../../infrastructure/database.js';
-import {
-  createAdminMiddleware,
-  registerScopedPreHandlers,
-} from '../../infrastructure/auth.guard.js';
+import { createAdminMiddleware, registerScopedPreHandlers } from '../../infrastructure/auth.guard.js';
 import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
 import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
 import { isMaskedPlaceholder, maskSecret, sanitizeEnvValue, updateEnvFile } from '../../infrastructure/env_manager.js';
+import { geminiTryOnEngine } from '../../modules/tryon/gemini.engine.js';
 
 const adminGuards = createAdminMiddleware();
 
 export async function adminAiEngineRoutes(app: FastifyInstance) {
   registerScopedPreHandlers(app, adminGuards);
-  // 1. Fetch AI Engine Configuration & Model Registry Status (Never leak plaintext API keys)
+
+  // 1. Read the try-on engine settings (never returns a key in plain text)
   app.get(
     '/api/v1/admin/ai-engine/config',
     { preHandler: requirePermission('ai', 'manage') },
     async (_request: FastifyRequest, reply: FastifyReply) => {
-      let aiServiceCapabilities: any = null;
-      try {
-        const res = await fetch(`${config.aiServiceUrl}/api/v1/models`, { headers: aiServiceHeaders(), signal: AbortSignal.timeout(3000) });
-        if (res.ok) {
-          aiServiceCapabilities = await res.json();
-        }
-      } catch {
-        // AI service may be starting or offline
-      }
-
+      const engine = geminiTryOnEngine.status();
       return reply.send({
-        activeProvider: config.vtonProvider || 'gemini',
+        activeProvider: 'gemini',
         gemini: {
-          configured: Boolean(config.geminiApiKey),
-          model: config.geminiModel || 'gemini-3.6-flash',
+          configured: engine.configured,
+          model: config.geminiModel,
+          imageModel: engine.imageModel,
           maskedKey: maskSecret(config.geminiApiKey),
-        },
-        fal: {
-          configured: Boolean(config.falKey),
-          maskedKey: maskSecret(config.falKey),
         },
         cloudinary: {
           configured: cloudinaryStorage.isConfigured(),
@@ -47,58 +33,28 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
           maskedSecret: maskSecret(config.cloudinaryApiSecret),
           folder: config.cloudinaryFolder || 'virtual-try-on',
         },
-        fallbackEnabled: true,
-        fallbackChain: ['gemini', 'fal', 'viton_hd'],
         availableProviders: [
           {
             id: 'gemini',
-            name: 'Google Gemini Multimodal Vision + Fashion Synthesis',
-            description: 'Analyzes model anatomy, fabric drape, and lighting using Gemini 2.5/Flash, then renders fitting.',
+            name: 'Google Gemini',
+            description: 'Looks at the person and the garment, writes a fitting prompt, then creates the try-on picture. It runs inside the backend.',
             recommended: true,
-            status: config.geminiApiKey ? 'ready' : 'key_required',
-          },
-          {
-            id: 'fal',
-            name: 'Fal AI FLUX Pro Virtual Try-On (fal-ai/flux-pro/v1/vto)',
-            description: 'Hyper-realistic multi-modal cloud inference via fal_client.',
-            status: config.falKey ? 'ready' : 'key_required',
-          },
-          {
-            id: 'viton',
-            name: 'Local VITON-HD Vision Synthesizer',
-            description: 'High-performance CPU/GPU local vision engine. Guaranteed instant zero-cost fallback.',
-            status: 'ready',
+            status: engine.configured ? 'ready' : 'key_required',
           },
         ],
-        aiServiceEngineUrl: config.aiServiceUrl,
-        aiServiceCapabilities,
       });
     }
   );
 
-  // 2. Update AI Engine Configuration (Dynamic Live Reload + Safe .env Sync)
+  // 2. Save the settings (applies right away and is written to the .env file)
   app.post(
     '/api/v1/admin/ai-engine/config',
     { preHandler: requirePermission('ai', 'manage') },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const body = (request.body as any) || {};
-      const {
-        activeProvider,
-        geminiApiKey,
-        geminiModel,
-        falKey,
-        cloudinaryCloudName,
-        cloudinaryApiKey,
-        cloudinaryApiSecret,
-        cloudinaryFolder,
-      } = body;
-
+      const { geminiApiKey, geminiModel, geminiImageModel, cloudinaryCloudName, cloudinaryApiKey, cloudinaryApiSecret, cloudinaryFolder } = body;
       const envUpdates: Record<string, string> = {};
 
-      if (typeof activeProvider === 'string' && activeProvider.trim()) {
-        const val = sanitizeEnvValue(activeProvider);
-        config.vtonProvider = val;
-      }
       if (typeof geminiApiKey === 'string' && geminiApiKey.trim() && !isMaskedPlaceholder(geminiApiKey)) {
         const val = sanitizeEnvValue(geminiApiKey);
         config.geminiApiKey = val;
@@ -111,11 +67,11 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
         process.env.GEMINI_MODEL = val;
         envUpdates.GEMINI_MODEL = val;
       }
-      if (typeof falKey === 'string' && falKey.trim() && !isMaskedPlaceholder(falKey)) {
-        const val = sanitizeEnvValue(falKey);
-        config.falKey = val;
-        process.env.FAL_KEY = val;
-        envUpdates.FAL_KEY = val;
+      if (typeof geminiImageModel === 'string' && geminiImageModel.trim()) {
+        const val = sanitizeEnvValue(geminiImageModel);
+        config.geminiImageModel = val;
+        process.env.GEMINI_IMAGE_MODEL = val;
+        envUpdates.GEMINI_IMAGE_MODEL = val;
       }
       if (cloudinaryCloudName !== undefined && typeof cloudinaryCloudName === 'string') {
         const val = sanitizeEnvValue(cloudinaryCloudName);
@@ -151,34 +107,30 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
         action: 'AI_ENGINE_CONFIG_UPDATED',
         entity: 'AiEngine',
         details: {
-          activeProvider: config.vtonProvider,
           geminiModel: config.geminiModel,
+          geminiImageModel: geminiTryOnEngine.imageModel(),
           geminiConfigured: Boolean(config.geminiApiKey),
-          falConfigured: Boolean(config.falKey),
           timestamp: new Date().toISOString(),
         },
       });
 
       return reply.send({
         success: true,
-        message: 'AI Engine configuration updated successfully. Changes applied in real time.',
+        message: 'Settings saved. They are in use right away.',
         config: {
-          activeProvider: config.vtonProvider,
+          activeProvider: 'gemini',
           gemini: {
             configured: Boolean(config.geminiApiKey),
             model: config.geminiModel,
+            imageModel: geminiTryOnEngine.imageModel(),
             maskedKey: maskSecret(config.geminiApiKey),
-          },
-          fal: {
-            configured: Boolean(config.falKey),
-            maskedKey: maskSecret(config.falKey),
           },
         },
       });
     }
   );
 
-  // 3. Test API Key Connectivity Directly from Super Admin Dashboard
+  // 3. Check that a key works, straight from the Super Admin screen
   app.post(
     '/api/v1/admin/ai-engine/test-key',
     { preHandler: requirePermission('ai', 'manage') },
@@ -193,7 +145,7 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
         }
 
         try {
-          // Pass API key via header instead of URL query string so it never appears in logs
+          // The key goes in a header, not the URL, so it never appears in logs.
           const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models', {
             headers: { 'x-goog-api-key': keyToTest },
             signal: AbortSignal.timeout(8000),
@@ -201,51 +153,24 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
 
           if (res.ok) {
             const data: any = await res.json();
-            const models = (data.models || []).map((m: any) => m.name.replace('models/', ''));
-            const recommendedModel = models.includes('gemini-3.6-flash')
-              ? 'gemini-3.6-flash'
-              : (models.find((m: string) => m.includes('flash') && !m.includes('latest')) || models[0]);
-
+            const models: string[] = (data.models || []).map((m: any) => String(m.name).replace('models/', ''));
+            const imageModels = models.filter((m) => /image|nano-banana/i.test(m));
             return reply.send({
               success: true,
               provider: 'gemini',
-              message: `✅ Gemini API Key is valid and operational! Connected to ${models.length} models.`,
+              message: `Your Gemini key works. ${models.length} models are available.`,
               modelsFound: models.length,
-              recommendedModel,
-              sampleModels: models.slice(0, 6),
+              hasImageModel: imageModels.length > 0,
+              imageModels: imageModels.slice(0, 6),
+              recommendedModel: imageModels.includes(geminiTryOnEngine.imageModel()) ? geminiTryOnEngine.imageModel() : imageModels[0] || null,
             });
           }
 
           const errText = await res.text();
-          return reply.status(400).send({
-            success: false,
-            provider: 'gemini',
-            message: `❌ Gemini API verification failed (HTTP ${res.status}): ${errText}`,
-          });
+          return reply.status(400).send({ success: false, provider: 'gemini', message: `Gemini did not accept this key (HTTP ${res.status}). ${errText.slice(0, 200)}` });
         } catch (err: any) {
-          return reply.status(500).send({
-            success: false,
-            provider: 'gemini',
-            message: `Network error verifying Gemini key: ${err.message}`,
-          });
+          return reply.status(500).send({ success: false, provider: 'gemini', message: `Could not reach Gemini: ${err.message}` });
         }
-      }
-
-      if (provider === 'fal') {
-        const candidate = apiKey && !isMaskedPlaceholder(apiKey) ? String(apiKey).trim() : '';
-        const keyToTest = candidate || config.falKey;
-        if (!keyToTest) {
-          return reply.status(400).send({ success: false, message: 'No Fal AI key provided to test.' });
-        }
-
-        const isValidFormat = keyToTest.length >= 20 && (keyToTest.includes(':') || keyToTest.startsWith('fal_'));
-        return reply.send({
-          success: isValidFormat,
-          provider: 'fal',
-          message: isValidFormat
-            ? '✅ Fal AI Key format is valid and ready for fal-ai/flux-pro/v1/vto pipelines.'
-            : '⚠️ Fal key format does not match expected key_id:key_secret or fal_ token format.',
-        });
       }
 
       if (provider === 'cloudinary') {
@@ -254,15 +179,12 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
           success: isReady,
           provider: 'cloudinary',
           message: isReady
-            ? `✅ Cloudinary storage is active and ready. Try-on results will upload automatically to '${config.cloudinaryFolder}/results'.`
-            : `⚠️ Cloudinary credentials incomplete. Please set Cloud Name, API Key, and API Secret in backend/.env.`,
+            ? `Cloudinary is ready. Try-on pictures are saved to '${config.cloudinaryFolder}/results'.`
+            : 'Cloudinary details are incomplete. Set the cloud name, API key and API secret.',
         });
       }
 
-      return reply.status(400).send({
-        success: false,
-        message: `Unknown provider '${provider}'. Supported: gemini, fal, cloudinary.`,
-      });
+      return reply.status(400).send({ success: false, message: `Unknown provider '${provider}'. Supported: gemini, cloudinary.` });
     }
   );
 }

@@ -74,12 +74,12 @@ export const config = {
       ? process.env.ENABLE_DOCS.toLowerCase() === 'true'
       : process.env.NODE_ENV !== 'production',
 
-  // AI Service & Vision Providers
-  aiServiceUrl: process.env.AI_SERVICE_URL || 'http://localhost:8000',
+  // Virtual try-on runs inside this backend by calling Google Gemini directly.
   geminiApiKey: process.env.GEMINI_API_KEY || '',
+  // A vision model writes the fitting prompt. If this is an image model, it is also used to create the picture.
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
-  falKey: process.env.FAL_KEY || '',
-  vtonProvider: 'gemini', // Runtime selector updated via Super Admin AI Engine UI
+  // The image model that creates the try-on picture (used when GEMINI_MODEL is not an image model).
+  geminiImageModel: process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
 
   // CORS: comma-separated list of allowed frontend origins (e.g. https://shop.example.com,http://localhost:3000).
   // The official domains above are always included; CORS_ORIGINS only adds extras.
