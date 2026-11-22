@@ -1,6 +1,8 @@
 # Virtual Try-On Unified Enterprise Backend (Fastify 5 + Prisma)
 
-Enterprise multi-tenant SaaS backend powering **Marketplace (`:3000`)**, **Brand Dashboard (`:3001`)**, and **Super Admin Control Plane (`:3002`)**, paired with the Python **AI Inference Service (`:8000`)**, RabbitMQ (`:5672`), Redis (`:6379`), PostgreSQL/Supabase, and Private Signed Object Storage.
+Enterprise multi-tenant SaaS backend powering **Marketplace (`:3000`)**, **Brand Dashboard (`:3001`)**, and **Super Admin Control Plane (`:3002`)**, with virtual try-on built in (it calls **Google Gemini** directly, so no separate AI service is needed), plus RabbitMQ (`:5672`), Redis (`:6379`), PostgreSQL/Supabase, and Private Signed Object Storage.
+
+**Virtual try-on settings:** set `GEMINI_API_KEY` in `.env`. `GEMINI_MODEL` is the vision model that writes the fitting prompt (default `gemini-3.6-flash`). `GEMINI_IMAGE_MODEL` is the model that creates the picture (default `gemini-2.5-flash-image`). If `GEMINI_MODEL` is itself an image model, it is used for the picture too.
 
 ---
 
