@@ -314,6 +314,11 @@ async function createBrandProductHandler(
   try {
     const created = await db.runTransaction(async () => db.createProduct(product));
     await catalogRepository.syncProductRelations(created);
+    await catalogRepository.ensureProductTaxonomy(tenantId, {
+      category: created.category,
+      collection: created.collection,
+      tryOnCategory: created.tryOnCategory,
+    });
 
     await recordAudit({
       actorId: request.authUser?.id || 'system',
@@ -771,6 +776,13 @@ export async function brandProductRoutes(app: FastifyInstance) {
       throw new NotFoundException('Product not found in your tenant catalog.');
     }
     await catalogRepository.syncProductRelations(updated);
+    if (body.category !== undefined || body.collection !== undefined) {
+      await catalogRepository.ensureProductTaxonomy(tenant.id, {
+        category: updated.category,
+        collection: updated.collection,
+        tryOnCategory: updated.tryOnCategory,
+      });
+    }
     return { message: 'Product updated successfully', product: updated };
   });
 

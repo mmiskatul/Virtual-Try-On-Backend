@@ -593,6 +593,56 @@ export class CatalogRepository {
     return foundInPrisma;
   }
 
+  /**
+   * Makes sure the category and collection a product uses exist in the brand's OWN lists.
+   * A product can pick a standard (default) category/collection that the brand never created;
+   * this adds it to the brand's account so it appears under Categories / Collections.
+   * Safe to call repeatedly (matches by name, ignoring case) and never throws: the product is already saved.
+   */
+  public async ensureProductTaxonomy(
+    tenantId: string,
+    input: { category?: string; collection?: string; tryOnCategory?: string }
+  ): Promise<void> {
+    const categoryName = input.category?.trim();
+    if (categoryName) {
+      try {
+        const existing = await this.findCategoryByName(tenantId, categoryName);
+        if (!existing) {
+          const { available, slug, suggestedSlug } = await this.checkCategorySlugAvailable(tenantId, categoryName);
+          const own = (await this.listCategories(tenantId)).filter((c) => c.tenantId === tenantId);
+          await this.upsertCategory({
+            tenantId,
+            name: categoryName,
+            slug: available ? slug : suggestedSlug || slug,
+            sortOrder: own.length + 1,
+            tryOnCategory: input.tryOnCategory,
+            active: true,
+          });
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message, tenantId }, 'catalog.ensure_category_warning');
+      }
+    }
+
+    const collectionTitle = input.collection?.trim();
+    if (collectionTitle) {
+      try {
+        const own = (await this.listCollections(tenantId)).filter((c) => c.tenantId === tenantId);
+        const lower = collectionTitle.toLowerCase();
+        if (!own.some((c) => c.title.trim().toLowerCase() === lower)) {
+          // Never reuse a slug that belongs to a different collection (upsert would overwrite it).
+          const base = slugify(collectionTitle);
+          const taken = new Set(own.map((c) => c.slug));
+          let slug = base;
+          for (let n = 2; taken.has(slug) && n <= 50; n += 1) slug = `${base}-${n}`;
+          await this.upsertCollection({ tenantId, title: collectionTitle, slug });
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message, tenantId }, 'catalog.ensure_collection_warning');
+      }
+    }
+  }
+
   public async syncProductRelations(product: Product): Promise<void> {
     const existingPub = memoryPublications.get(product.id);
     const nextPub: PublicationMeta = {
