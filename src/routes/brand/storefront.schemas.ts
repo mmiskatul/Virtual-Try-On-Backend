@@ -206,6 +206,13 @@ export const StorefrontSettingsOutputSchema = z
     country: z.string().optional(),
     address: z.string().optional(),
     currency: z.literal('BDT').optional(),
+    store: z
+      .object({
+        open: z.boolean().optional(),
+        shipping: z.object({ defaultFee: z.number(), freeOver: z.number().nullable() }).optional(),
+        seo: z.object({ title: z.string(), description: z.string() }).optional(),
+      })
+      .optional(),
     socialLinks: z
       .object({
         instagram: z.string().optional(),

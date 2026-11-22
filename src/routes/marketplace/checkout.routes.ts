@@ -4,6 +4,7 @@ import { db } from '../../infrastructure/database.js';
 import { resolveOptionalAuthUser } from '../../infrastructure/auth.guard.js';
 import { Order, OrderItem } from '../../domain/types.js';
 import { evaluateDiscount, recordDiscountUse } from '../../modules/commerce/discounts.js';
+import { resolveStoreSettings, shippingFeeFor } from '../../modules/commerce/store_settings.js';
 
 interface CheckoutItemInput {
   productId: string;
@@ -132,7 +133,16 @@ function validateCartItems(items: any[], couponCode?: unknown): {
     };
   }
 
-  const shippingFee = subtotal >= 150 ? 0 : 15.0;
+  const storeSettings = resolveStoreSettings(tenant);
+  if (!storeSettings.open) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'StoreClosed',
+      message: `${tenant.name} is closed for now. Please check back soon.`,
+    };
+  }
+  const shippingFee = shippingFeeFor(storeSettings, subtotal);
 
   let discountAmount = 0;
   let appliedCode: string | undefined;
