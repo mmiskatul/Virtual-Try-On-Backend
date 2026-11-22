@@ -25,6 +25,9 @@ export const TryOnGenerationRequestedV1Schema = z.object({
     category: z.string().min(1).default('tops'),
     quality: z.enum(['fast_preview', 'standard', 'high_fidelity']).default('standard'),
     prompt: z.string().optional(),
+    // Who is trying it on (checked values only): used so the garment fits the way their size would.
+    gender: z.enum(['female', 'male']).optional(),
+    size: z.string().max(8).optional(),
   }),
 });
 

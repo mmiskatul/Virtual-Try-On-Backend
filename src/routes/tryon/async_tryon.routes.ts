@@ -9,6 +9,7 @@ import {
 import { LogicalBucket } from '../../infrastructure/storage.adapter.js';
 import { PLATFORM_ADMIN_ROLE_CODES } from '../../modules/rbac/rbac.catalog.js';
 import { tryonEventsBus, tryonOrchestrator } from '../../modules/tryon/tryon.orchestrator.js';
+import { GenderSchema, SizeSchema } from '../../modules/tryon/shopper_fit.js';
 
 const UploadIntentSchema = z.object({
   contentType: z.string().default('image/jpeg'),
@@ -31,6 +32,9 @@ const CreateAsyncJobSchema = z.object({
   quality: z.enum(['fast_preview', 'standard', 'high_fidelity']).default('standard'),
   modelKey: z.string().default('default-tryon'),
   prompt: z.string().max(400).optional(),
+  // The shopper's gender and usual size, chosen on the try-on page.
+  gender: GenderSchema.optional(),
+  size: SizeSchema.optional(),
   idempotencyKey: z.string().optional(),
 });
 
@@ -94,6 +98,8 @@ export async function asyncTryOnRoutes(app: FastifyInstance) {
       quality: parsed.data.quality,
       modelKey: parsed.data.modelKey,
       prompt: parsed.data.prompt,
+      gender: parsed.data.gender,
+      size: parsed.data.size,
       idempotencyKey,
       correlationId: request.correlationId,
     });

@@ -39,7 +39,13 @@ export async function runTryOnPipeline(
     const garment = validateImage(garmentBytes, 'The garment photo');
     const preparedAt = Date.now();
 
-    const result = await engine.generate({ person, garment, category: req.options.category, prompt: req.options.prompt });
+    const result = await engine.generate({
+      person,
+      garment,
+      category: req.options.category,
+      prompt: req.options.prompt,
+      shopper: { gender: req.options.gender, size: req.options.size },
+    });
 
     const ext = EXTENSIONS[result.mimeType] || 'png';
     const objectKey = `${req.tenantId}/${req.generationId}/result.${ext}`;

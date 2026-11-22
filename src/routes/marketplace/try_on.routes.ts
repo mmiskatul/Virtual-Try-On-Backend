@@ -4,6 +4,7 @@ import { config } from '../../infrastructure/config.js';
 import { db } from '../../infrastructure/database.js';
 import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
 import { TryOnEngineError, geminiTryOnEngine } from '../../modules/tryon/gemini.engine.js';
+import { parseShopperFit } from '../../modules/tryon/shopper_fit.js';
 import { getDirectResult, httpStatusFor, refreshResultUrl, rememberDirectResult, runDirectTryOn } from '../../modules/tryon/direct_tryon.js';
 
 /**
@@ -114,7 +115,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
    * so there is nothing to wait for or poll. /submit and /direct do the same job; /submit is kept for older clients.
    */
   const createTryOn = async (request: FastifyRequest, reply: FastifyReply, successCode: number) => {
-    const { personImage, garmentImage: requestedGarmentImage, category, productId, prompt } = (request.body as any) || {};
+    const { personImage, garmentImage: requestedGarmentImage, category, productId, prompt, gender, size } = (request.body as any) || {};
     // Prefer the brand's clear AI reference image over the styled display photo.
     const garmentImage = resolveGarmentImage(productId, requestedGarmentImage);
 
@@ -146,6 +147,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
         garmentImage,
         category: job.category,
         prompt: typeof prompt === 'string' ? prompt.slice(0, 500) : undefined,
+        shopper: parseShopperFit({ gender, size }),
       });
       db.finalizeGeneration(job.id, 'COMPLETED');
       rememberDirectResult(job.id, { status: 'COMPLETED', result: hosted });

@@ -1,4 +1,5 @@
 import { config } from '../../infrastructure/config.js';
+import { fitInstruction, type ShopperFit } from './shopper_fit.js';
 
 /**
  * The virtual try-on engine. It asks Google Gemini to dress the person in the garment and gives back the image.
@@ -184,7 +185,7 @@ export class GeminiTryOnEngine {
   }
 
   /** Step 1: let a vision model write the fitting prompt. Best effort: any failure just uses a plain prompt. */
-  private async writePrompt(person: EngineImage, garment: EngineImage, category: string, userPrompt?: string): Promise<{ prompt: string; model: string }> {
+  private async writePrompt(person: EngineImage, garment: EngineImage, category: string, userPrompt?: string, shopper?: ShopperFit): Promise<{ prompt: string; model: string }> {
     const fallback = userPrompt || `A natural front-facing studio shot. The ${category} garment is worn naturally with realistic fabric drape.`;
     const ask = [
       'Analyze these two images and write a detailed prompt for a photorealistic fashion virtual try-on:',
@@ -192,9 +193,10 @@ export class GeminiTryOnEngine {
       '- Image 2: the garment (fabric, colour, cut, collar, drape, texture, pattern).',
       `Category: ${category}.`,
       `Styling instructions: ${userPrompt || 'A natural, authentic studio shot with accurate fabric drape and a tailored fit.'}`,
+      fitInstruction(shopper, category),
       'Describe how the garment from image 2 should look on the person in image 1.',
       'Output ONLY the final image prompt, with no introduction and no markdown.',
-    ].join('\n');
+    ].filter(Boolean).join('\n');
     const body = { contents: [{ parts: [{ text: ask }, inline(person), inline(garment)] }] };
 
     for (const model of this.promptModels()) {
@@ -211,10 +213,10 @@ export class GeminiTryOnEngine {
   }
 
   /** Step 2: create the picture. Retries a couple of times when Gemini is busy. */
-  private async makeImage(person: EngineImage, garment: EngineImage, category: string, prompt: string): Promise<{ bytes: Buffer; mimeType: string }> {
+  private async makeImage(person: EngineImage, garment: EngineImage, category: string, prompt: string, shopper?: ShopperFit): Promise<{ bytes: Buffer; mimeType: string }> {
     const instruction =
       `Virtual try-on task: dress the person from the first image in the ${category} garment from the second image. ` +
-      `Keep the person's face, body pose, skin tone and the background natural. ${prompt}`.trim();
+      `Keep the person's face, body pose, skin tone and the background natural. ${fitInstruction(shopper, category)} ${prompt}`.replace(/\s+/g, ' ').trim();
     const body = {
       contents: [{ parts: [{ text: instruction }, inline(person), inline(garment)] }],
       generationConfig: { responseModalities: ['IMAGE'] },
@@ -249,7 +251,7 @@ export class GeminiTryOnEngine {
     throw lastError ?? new TryOnEngineError('UPSTREAM_ERROR', 'Could not create the picture.', true);
   }
 
-  public async generate(input: { person: EngineImage; garment: EngineImage; category: string; prompt?: string }): Promise<EngineResult> {
+  public async generate(input: { person: EngineImage; garment: EngineImage; category: string; prompt?: string; shopper?: ShopperFit }): Promise<EngineResult> {
     const started = Date.now();
     const category = (input.category || 'tops').toLowerCase();
     if (!(SUPPORTED_CATEGORIES as readonly string[]).includes(category)) {
@@ -260,9 +262,9 @@ export class GeminiTryOnEngine {
     }
 
     const t0 = Date.now();
-    const { prompt, model: promptModel } = await this.writePrompt(input.person, input.garment, category, input.prompt);
+    const { prompt, model: promptModel } = await this.writePrompt(input.person, input.garment, category, input.prompt, input.shopper);
     const t1 = Date.now();
-    const image = await this.makeImage(input.person, input.garment, category, prompt);
+    const image = await this.makeImage(input.person, input.garment, category, prompt, input.shopper);
     const t2 = Date.now();
 
     const info = sniffImage(image.bytes);

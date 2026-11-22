@@ -218,6 +218,8 @@ export class TryOnOrchestrator {
     quality?: 'fast_preview' | 'standard' | 'high_fidelity';
     modelKey?: string;
     prompt?: string;
+    gender?: 'female' | 'male';
+    size?: string;
     idempotencyKey?: string;
     correlationId: string;
   }) {
@@ -375,6 +377,8 @@ export class TryOnOrchestrator {
         category: reserve.job.category,
         quality,
         prompt: input.prompt,
+        ...(input.gender ? { gender: input.gender } : {}),
+        ...(input.size ? { size: input.size } : {}),
       },
     });
 
