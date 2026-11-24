@@ -79,6 +79,14 @@ export async function brandAuthRoutes(app: FastifyInstance) {
       });
     }
 
+    // Length caps keep oversized input (and very slow password hashing) out of the system.
+    if (brandName.length > 80 || ownerName.length > 80 || slug.length > 60 || rawEmail.length > 254 || password.length > 128) {
+      return reply.status(400).send({
+        error: 'ValidationError',
+        message: 'One of the fields is too long (brand and owner name 80, email 254, password 128 characters).',
+      });
+    }
+
     const email = normalizeEmail(rawEmail);
     if (!isValidEmail(email)) {
       return reply.status(400).send({

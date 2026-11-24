@@ -35,7 +35,7 @@ async function runSecurityTests() {
     password: ' <Pass123> ',
     __proto__: { polluted: true },
   });
-  assert(sanitized.name === 'bMaya/b', 'HTML angle brackets stripped from normal fields');
+  assert(sanitized.name === '<b>Maya</b>', 'Text is kept as typed (escaped on output) and control characters are removed');
   assert(sanitized.password === ' <Pass123> ', 'Passwords preserve angle brackets and spaces verbatim');
   assert((sanitized as any).polluted === undefined, 'Prototype pollution keys dropped');
   assert(sanitizeEnvValue('smtp.gmail.com\r\nJWT_SECRET=evil') === 'smtp.gmail.comJWT_SECRET=evil', 'CR/LF stripped to prevent .env injection');
