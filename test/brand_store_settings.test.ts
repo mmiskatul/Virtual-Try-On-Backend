@@ -37,7 +37,13 @@ describe('Store settings (open or closed, delivery charges, search text)', () =>
 
   it('merging keeps what was not changed', () => {
     const merged = mergeStoreSettings(DEFAULT_STORE_SETTINGS, { shipping: { defaultFee: 40 }, seo: { title: 'Aura' } });
-    expect(merged).toEqual({ open: true, shipping: { defaultFee: 40, freeOver: 150 }, seo: { title: 'Aura', description: '' } });
+    expect(merged).toEqual({
+      open: true,
+      shipping: { defaultFee: 40, freeOver: 150 },
+      seo: { title: 'Aura', description: '' },
+      audience: 'UNISEX',
+      returns: { policy: '', windowDays: null },
+    });
     expect(resolveStoreSettings(null)).toEqual(DEFAULT_STORE_SETTINGS);
   });
 
@@ -62,6 +68,12 @@ describe('Store settings (open or closed, delivery charges, search text)', () =>
       { open: 'yes' },
       { admin: true },
       { shipping: { defaultFee: 10, extra: 1 } },
+      { audience: 'KIDS' },
+      { returns: { windowDays: 0 } },
+      { returns: { windowDays: 366 } },
+      { returns: { windowDays: 7.5 } },
+      { returns: { policy: 'x'.repeat(2001) } },
+      { returns: { policy: 'ok', extra: 1 } },
     ]) {
       const res = await save(bad);
       expect(res.statusCode, JSON.stringify(bad)).toBe(400);
@@ -106,6 +118,28 @@ describe('Store settings (open or closed, delivery charges, search text)', () =>
     // Private things such as API keys never appear on the public store.
     expect(JSON.stringify(pub)).not.toContain('apiKeys');
     expect(JSON.stringify(pub)).not.toContain('tokenHash');
+  });
+
+  it('saves who the store is for and the return policy, and shows them on the public store', async () => {
+    expect(DEFAULT_STORE_SETTINGS.audience).toBe('UNISEX');
+    expect(DEFAULT_STORE_SETTINGS.returns).toEqual({ policy: '', windowDays: null });
+
+    const saved = await save({ audience: 'WOMEN', returns: { policy: 'Return unworn items with tags.', windowDays: 7 } });
+    expect(saved.statusCode).toBe(200);
+    expect(json(saved).settings.audience).toBe('WOMEN');
+    expect(json(saved).settings.returns).toEqual({ policy: 'Return unworn items with tags.', windowDays: 7 });
+
+    // Changing one part keeps the other.
+    const second = await save({ returns: { windowDays: null } });
+    expect(json(second).settings.audience).toBe('WOMEN');
+    expect(json(second).settings.returns).toEqual({ policy: 'Return unworn items with tags.', windowDays: null });
+
+    const tenant = db.getTenantById('tenant_aura');
+    const pub = json(await app.inject({ method: 'GET', url: `/api/v1/internal/storefront/${tenant!.slug}` }));
+    expect(pub.tenant.storefrontSettings.store.audience).toBe('WOMEN');
+    expect(pub.tenant.storefrontSettings.store.returns.policy).toBe('Return unworn items with tags.');
+
+    await save({ audience: 'UNISEX', returns: { policy: '', windowDays: null } });
   });
 
   it('keeps brands apart', async () => {
