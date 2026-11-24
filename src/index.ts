@@ -5,6 +5,7 @@ import { getValidatedEnv } from './infrastructure/env.schema.js';
 import { redisAdapter } from './infrastructure/redis.js';
 import { rabbitMqBus } from './infrastructure/rabbitmq.js';
 import { outboxRelayWorker } from './infrastructure/outbox.js';
+import { tryonOrchestrator } from './modules/tryon/tryon.orchestrator.js';
 import { commerceEngagementService } from './modules/commerce/engagement.service.js';
 
 async function bootstrap() {
@@ -21,6 +22,11 @@ async function bootstrap() {
 
   const app = createApp('all');
   void commerceEngagementService.startHydration(); // reload saved reviews and notifications after a restart
+
+  // Delete shopper photos once their retention time is over (hourly).
+  setInterval(() => {
+    tryonOrchestrator.purgeExpiredUploads().catch(() => undefined);
+  }, 60 * 60 * 1000).unref();
 
   try {
     await app.listen({ port: config.port, host: config.host });

@@ -104,6 +104,23 @@ export async function fetchRemoteImageSafely(urlStr: string): Promise<{ buffer: 
 }
 
 export class TryOnOrchestrator {
+  /** Deletes shopper photos whose retention time has passed. Returns how many were removed. */
+  public async purgeExpiredUploads(now = Date.now()): Promise<number> {
+    let removed = 0;
+    for (const [id, rec] of Array.from(uploadRegistry.entries())) {
+      if (rec.expiresAt.getTime() > now) continue;
+      try {
+        await storageAdapter.delete(rec.bucket, rec.objectKey);
+      } catch (err: any) {
+        logger.warn({ err: err?.message, id }, 'tryon.purge_delete_failed');
+        continue;
+      }
+      uploadRegistry.delete(id);
+      removed++;
+    }
+    return removed;
+  }
+
   public async createUploadIntent(input: {
     userId?: string;
     contentType: string;
@@ -222,6 +239,8 @@ export class TryOnOrchestrator {
     size?: string;
     garmentSize?: string;
     idempotencyKey?: string;
+    /** Shopper's answer to the consent box when sending a photo by link instead of an upload. */
+    consentGiven?: boolean;
     correlationId: string;
   }) {
     const product = db.getProducts().find((p) => p.id === input.productId);
@@ -235,6 +254,27 @@ export class TryOnOrchestrator {
     }
     if (!resolveTryOnSettings(tenant).enabled) {
       return { ok: false as const, status: 403, error: 'TryOnDisabled', message: 'This shop has turned virtual try-on off.' };
+    }
+
+    // Enforce the brand's photo-privacy settings: consent, then how long the photo is kept.
+    const privacy = resolveTryOnSettings(tenant);
+    const upload = input.personUpload
+      ? Array.from(uploadRegistry.values()).find((u) => u.objectKey === input.personUpload!.objectKey)
+      : undefined;
+    if (privacy.requireConsent) {
+      const consented = upload ? upload.consentGiven : input.consentGiven !== false;
+      if (!consented) {
+        return {
+          ok: false as const,
+          status: 403,
+          error: 'ConsentRequired',
+          message: 'This shop needs your permission to use your photo for the try-on preview.',
+        };
+      }
+    }
+    if (upload) {
+      const keepUntil = new Date(Date.now() + Math.max(1, privacy.retentionDays) * 86_400_000);
+      if (keepUntil < upload.expiresAt) upload.expiresAt = keepUntil;
     }
 
     const isTenantAuthorized = input.isSuperAdmin || input.callerTenantId === product.tenantId;

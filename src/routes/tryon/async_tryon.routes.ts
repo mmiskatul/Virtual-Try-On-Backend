@@ -14,7 +14,8 @@ import { GenderSchema, SizeSchema } from '../../modules/tryon/shopper_fit.js';
 const UploadIntentSchema = z.object({
   contentType: z.string().default('image/jpeg'),
   sizeBytes: z.number().int().positive().max(10 * 1024 * 1024),
-  consentGiven: z.boolean().default(true),
+  // No consent unless the shopper actually gave it.
+  consentGiven: z.boolean().default(false),
 });
 
 const CreateAsyncJobSchema = z.object({
@@ -37,6 +38,7 @@ const CreateAsyncJobSchema = z.object({
   size: SizeSchema.optional(),
   garmentSize: SizeSchema.optional(),
   idempotencyKey: z.string().optional(),
+  consentGiven: z.boolean().optional(),
 });
 
 async function resolveOptionalAuth(request: FastifyRequest): Promise<{
@@ -103,6 +105,7 @@ export async function asyncTryOnRoutes(app: FastifyInstance) {
       size: parsed.data.size,
       garmentSize: parsed.data.garmentSize,
       idempotencyKey,
+      consentGiven: parsed.data.consentGiven,
       correlationId: request.correlationId,
     });
 
