@@ -135,6 +135,10 @@ export interface StoreSettings {
   open: boolean;
   shipping: { defaultFee: number; freeOver: number | null };
   seo: { title: string; description: string };
+  /** Who the whole store is for. UNISEX means both: shoppers choose on the try-on page. */
+  audience: ProductAudience;
+  /** The return policy shoppers read. `windowDays` null means no set return window. */
+  returns: { policy: string; windowDays: number | null };
 }
 
 export interface StorefrontSettings {
