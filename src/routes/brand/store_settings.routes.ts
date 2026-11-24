@@ -38,7 +38,13 @@ export async function brandStoreSettingsRoutes(app: FastifyInstance) {
       entity: 'StoreSettings',
       entityId: tenant.id,
       correlationId: request.correlationId,
-      details: { open: merged.open, defaultFee: merged.shipping.defaultFee, freeOver: merged.shipping.freeOver },
+      details: {
+        open: merged.open,
+        defaultFee: merged.shipping.defaultFee,
+        freeOver: merged.shipping.freeOver,
+        audience: merged.audience,
+        returnWindowDays: merged.returns.windowDays,
+      },
     });
     return { message: 'Store settings saved.', settings: resolveStoreSettings(updated) };
   });
