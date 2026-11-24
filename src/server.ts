@@ -138,6 +138,30 @@ export function createApp(domain: AppDomain = 'all'): FastifyInstance {
     observability.trackRequestEnd(reply.statusCode);
   });
 
+  // Browser protections on every response.
+  app.addHook('onSend', async (_request, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'DENY');
+    reply.header('Referrer-Policy', 'no-referrer');
+    reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+    if (process.env.NODE_ENV === 'production') {
+      reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    return payload;
+  });
+
+  // CSRF guard: a browser request that changes data and carries login cookies must come from an allowed site.
+  // (Requests without an Origin header, such as servers and API keys, are not browser form posts.)
+  app.addHook('onRequest', async (request, reply) => {
+    if (config.corsOrigins.length === 0) return; // development: no allow-list configured
+    if (['GET', 'HEAD', 'OPTIONS'].includes(request.method)) return;
+    const origin = request.headers.origin;
+    if (!origin || !request.headers.cookie) return;
+    if (!config.corsOrigins.includes(origin)) {
+      return reply.status(403).send({ error: 'Forbidden', code: 'CROSS_SITE_BLOCKED', message: 'This request came from a site that is not allowed.' });
+    }
+  });
+
   // Input Sanitization Hook
   app.addHook('preValidation', async (request) => {
     if (
