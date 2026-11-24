@@ -11,6 +11,7 @@ import {
 } from '../modules/rbac/rbac.catalog.js';
 import { ActiveViewAsSession, getActiveViewAsSession, tenantScopeGuard } from '../modules/tenants/tenant.scope.js';
 import { getTeamAccess } from '../modules/team/team_access.js';
+import { isUserSuspendedInMemory } from '../modules/admin/user_status.js';
 
 /** A team member with a temporary password may only do these until they choose their own password. */
 const PASSWORD_CHANGE_ALLOWED = [
@@ -186,6 +187,14 @@ export async function authenticateToken(request: FastifyRequest, reply: FastifyR
     request.sessionId = claims.sid;
     request.authSource = claims.authSource;
 
+    // Works for every database driver, not only Prisma.
+    if (isUserSuspendedInMemory(user.id)) {
+      return reply.status(403).send({
+        error: 'AccountSuspended',
+        message: 'User account has been suspended by platform administration.',
+      });
+    }
+
     const roleSet = new Set<string>([user.role]);
     const prisma = getGlobalPrisma();
     if (prisma) {
@@ -283,10 +292,11 @@ export async function authenticateToken(request: FastifyRequest, reply: FastifyR
         error: 'TokenExpired',
         code: 'TOKEN_EXPIRED',
         message: 'Access token expired.',
-        details: err.message,
       });
     }
-    return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid or expired token.', details: err.message });
+    // Never echo verifier internals back to the client.
+    request.log.debug({ err: err?.message }, 'auth.token_rejected');
+    return reply.status(401).send({ error: 'Unauthorized', message: 'Invalid or expired token.' });
   }
 }
 
