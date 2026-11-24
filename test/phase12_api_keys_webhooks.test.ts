@@ -170,14 +170,16 @@ describe('Phase 12: API keys and webhooks', () => {
       expect((await createKey(aura, { name: 'One too many', scopes: ['products:read'] })).statusCode).toBe(400);
     });
 
-    it('rate limits each key', async () => {
+    it('rate limits public API calls per client address, not per key', async () => {
       process.env.RATE_LIMIT_DISABLED = 'false';
       try {
         const key = json(await createKey(vogue, { name: 'Busy integration', scopes: ['products:read'] })).key;
         const codes: number[] = [];
-        for (let i = 0; i < 125; i++) codes.push((await call('GET', '/api/v1/public/me', key)).statusCode);
-        expect(codes.slice(0, 120).every((c) => c === 200)).toBe(true);
-        expect(codes.slice(120)).toContain(429);
+        for (let i = 0; i < 305; i++) codes.push((await call('GET', '/api/v1/public/me', key)).statusCode);
+        expect(codes.slice(0, 300).every((c) => c === 200)).toBe(true);
+        expect(codes.slice(300)).toContain(429);
+        // Rotating to a made-up key must not give a fresh allowance.
+        expect((await call('GET', '/api/v1/public/me', 'vtry_fake_rotated_key')).statusCode).toBe(429);
       } finally {
         process.env.RATE_LIMIT_DISABLED = 'true';
       }
