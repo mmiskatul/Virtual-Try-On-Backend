@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import { paginate } from '../../infrastructure/http.js';
 import { db } from '../../infrastructure/database.js';
 import {
   createBrandMiddleware,
@@ -17,8 +18,8 @@ export async function brandOrderRoutes(app: FastifyInstance) {
   // Get Brand Orders
   app.get('/api/v1/brand/orders', { preHandler: brandOrderReadGuards }, async (request: FastifyRequest, reply: FastifyReply) => {
     if (!request.tenant) return reply.status(403).send({ error: 'Forbidden', message: 'Brand tenant context required.' });
-    const orders = db.getOrdersByTenant(request.tenant.id);
-    return { orders };
+    const { items: orders, page } = paginate(db.getOrdersByTenant(request.tenant.id), request.query);
+    return page ? { orders, page } : { orders };
   });
 
   // Update Order Status

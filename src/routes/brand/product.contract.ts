@@ -377,6 +377,7 @@ export const BrandProductOutputSchema = ProductOutputSchema.extend({
 
 export const BrandProductListResponseSchema = z.object({
   products: z.array(BrandProductOutputSchema),
+  page: z.object({ total: z.number(), limit: z.number(), offset: z.number() }).optional(),
 });
 
 export const BrandProductCreateResponseSchema = z.object({

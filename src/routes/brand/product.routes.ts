@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { paginate } from '../../infrastructure/http.js';
 import { Product, ProductVariant } from '../../domain/types.js';
 import { createBrandMiddleware, registerScopedPreHandlers } from '../../infrastructure/auth.guard.js';
 import { db } from '../../infrastructure/database.js';
@@ -358,10 +359,10 @@ export async function brandProductRoutes(app: FastifyInstance) {
   const listProductsHandler = async (request: FastifyRequest) => {
     const tenant = requireTenantContext(request.tenant);
     const query = parseWithSchema(ProductListQuerySchema, request.query ?? {});
-    const products = filterTenantProducts(db.getProductsByTenant(tenant.id), query);
+    const { items: products, page } = paginate(filterTenantProducts(db.getProductsByTenant(tenant.id), query), request.query);
     return validateZodOutput(
       BrandProductListResponseSchema,
-      { products },
+      { products, ...(page ? { page } : {}) },
       'GET /api/v1/products'
     );
   };

@@ -1,4 +1,5 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
+import { paginate } from '../../infrastructure/http.js';
 import { db } from '../../infrastructure/database.js';
 import { createBrandMiddleware } from '../../infrastructure/auth.guard.js';
 import { NotFoundException } from '../../infrastructure/errors.js';
@@ -44,8 +45,10 @@ export async function brandCustomerRoutes(app: FastifyInstance) {
     const customers = Array.from(byEmail.entries())
       .map(([email, orders]) => summarize(email, orders))
       .sort((a, b) => b.lastOrderAt - a.lastOrderAt);
+    const { items: pageItems, page } = paginate(customers, request.query);
     return {
-      customers,
+      customers: pageItems,
+      ...(page ? { page } : {}),
       totals: {
         customers: customers.length,
         returning: customers.filter((c) => c.group === 'RETURNING').length,

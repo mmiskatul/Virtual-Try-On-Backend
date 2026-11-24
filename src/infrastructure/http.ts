@@ -67,3 +67,15 @@ export function errorResponse(
   });
 }
 
+
+/**
+ * Optional paging for list endpoints. Without ?limit the whole list is returned (older clients keep working);
+ * with ?limit=50&offset=100 only that slice comes back, and `page` tells the caller how many exist in total.
+ */
+export function paginate<T>(items: T[], query: unknown): { items: T[]; page?: { total: number; limit: number; offset: number } } {
+  const q = (query || {}) as { limit?: string | number; offset?: string | number };
+  if (q.limit === undefined || q.limit === '') return { items };
+  const limit = Math.min(500, Math.max(1, Math.floor(Number(q.limit)) || 50));
+  const offset = Math.max(0, Math.floor(Number(q.offset)) || 0);
+  return { items: items.slice(offset, offset + limit), page: { total: items.length, limit, offset } };
+}
