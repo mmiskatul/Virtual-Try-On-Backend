@@ -211,6 +211,8 @@ export const StorefrontSettingsOutputSchema = z
         open: z.boolean().optional(),
         shipping: z.object({ defaultFee: z.number(), freeOver: z.number().nullable() }).optional(),
         seo: z.object({ title: z.string(), description: z.string() }).optional(),
+        audience: z.enum(['WOMEN', 'MEN', 'UNISEX']).optional(),
+        returns: z.object({ policy: z.string(), windowDays: z.number().nullable() }).optional(),
       })
       .optional(),
     socialLinks: z
