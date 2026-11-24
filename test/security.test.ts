@@ -144,7 +144,10 @@ async function runSecurityTests() {
   });
   const aiCfg = JSON.parse(aiCfgRes.body);
   assert(aiCfgRes.statusCode === 200, 'GET /api/v1/admin/ai-engine/config returns 200');
-  assert(aiCfg.gemini.apiKey === undefined && aiCfg.fal.apiKey === undefined, 'Plaintext API keys not leaked in AI config response');
+  assert(
+    aiCfg.gemini.apiKey === undefined && aiCfg.cloudinary.apiKey === undefined && aiCfg.cloudinary.apiSecret === undefined,
+    'Plaintext API keys not leaked in AI config response'
+  );
 
   const infraCust = await app.inject({
     method: 'GET',
