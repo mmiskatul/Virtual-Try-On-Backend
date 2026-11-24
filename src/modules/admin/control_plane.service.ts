@@ -10,6 +10,7 @@ import { revokeAllUserSessions } from '../auth/jwt.verifier.js';
 import { billingCreditService } from '../billing/billing.service.js';
 import { catalogRepository } from '../catalog/catalog.repository.js';
 import { hasPermission } from '../rbac/rbac.catalog.js';
+import { memoryUserStatus } from './user_status.js';
 
 export interface CmsContentDto {
   id: string;
@@ -93,7 +94,6 @@ export interface AiModelDto {
   isDefault: boolean;
 }
 
-const memoryUserStatus = new Map<string, 'ACTIVE' | 'SUSPENDED'>();
 const memoryAiModels: AiModelDto[] = [
   {
     id: 'model_gemini_vton',
