@@ -40,6 +40,7 @@ export const PERMISSION_DEFINITIONS: Array<{ module: string; action: string; des
   { module: 'brand:products', action: 'write', description: 'Create, edit, and publish brand products' },
   { module: 'brand:orders', action: 'read', description: 'View brand orders and customer shipments' },
   { module: 'brand:orders', action: 'write', description: 'Update fulfillment and order statuses' },
+  { module: 'brand:reviews', action: 'reply', description: 'Answer shopper reviews in the brand name' },
   { module: 'brand:analytics', action: 'read', description: 'View brand revenue and try-on conversion analytics' },
   { module: 'brand:staff', action: 'manage', description: 'Invite and assign brand team members' },
   { module: 'brand:billing', action: 'manage', description: 'Manage brand subscription and try-on credits' },
@@ -147,7 +148,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     scope: 'TENANT',
     isSystem: true,
     mfaRequired: false,
-    permissions: ['brand:products:read', 'brand:products:write', 'brand:orders:read', 'brand:orders:write', 'brand:analytics:read', 'brand:staff:manage', 'brand:billing:manage', 'brand:tryon:use'],
+    permissions: ['brand:products:read', 'brand:products:write', 'brand:orders:read', 'brand:reviews:reply', 'brand:orders:write', 'brand:analytics:read', 'brand:staff:manage', 'brand:billing:manage', 'brand:tryon:use'],
   },
   {
     code: 'BRAND_ADMIN',
@@ -156,7 +157,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     scope: 'TENANT',
     isSystem: true,
     mfaRequired: false,
-    permissions: ['brand:products:read', 'brand:products:write', 'brand:orders:read', 'brand:orders:write', 'brand:analytics:read', 'brand:staff:manage', 'brand:tryon:use'],
+    permissions: ['brand:products:read', 'brand:products:write', 'brand:orders:read', 'brand:reviews:reply', 'brand:orders:write', 'brand:analytics:read', 'brand:staff:manage', 'brand:tryon:use'],
   },
   {
     code: 'CATALOG_MANAGER',
@@ -183,7 +184,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     scope: 'TENANT',
     isSystem: true,
     mfaRequired: false,
-    permissions: ['brand:orders:read', 'brand:orders:write', 'brand:products:read'],
+    permissions: ['brand:orders:read', 'brand:reviews:reply', 'brand:orders:write', 'brand:products:read'],
   },
   {
     code: 'SUPPORT_AGENT',
@@ -192,7 +193,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     scope: 'TENANT',
     isSystem: true,
     mfaRequired: false,
-    permissions: ['brand:orders:read', 'brand:products:read'],
+    permissions: ['brand:orders:read', 'brand:reviews:reply', 'brand:products:read'],
   },
   {
     code: 'ANALYTICS_VIEWER',
@@ -210,7 +211,7 @@ export const ROLE_DEFINITIONS: RoleDefinition[] = [
     scope: 'TENANT',
     isSystem: true,
     mfaRequired: false,
-    permissions: ['brand:products:read', 'brand:products:write', 'brand:orders:read', 'brand:orders:write', 'brand:analytics:read', 'brand:tryon:use'],
+    permissions: ['brand:products:read', 'brand:products:write', 'brand:orders:read', 'brand:reviews:reply', 'brand:orders:write', 'brand:analytics:read', 'brand:tryon:use'],
   },
   {
     code: 'CUSTOMER',

@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { authenticateToken, requireShopperPortal } from '../../infrastructure/auth.guard.js';
 import { okResponse } from '../../infrastructure/http.js';
+import { requirePermission } from '../../modules/rbac/rbac.catalog.js';
 import { tenantScopeGuard } from '../../modules/tenants/tenant.scope.js';
 import { commerceEngagementService } from '../../modules/commerce/engagement.service.js';
 import { adminControlPlaneService } from '../../modules/admin/control_plane.service.js';
@@ -120,7 +121,7 @@ export async function commerceEngagementRoutes(app: FastifyInstance) {
 
   app.post(
     '/api/v1/reviews/:id/reply',
-    { preHandler: [authenticateToken, tenantScopeGuard] },
+    { preHandler: [authenticateToken, tenantScopeGuard, requirePermission('brand:reviews', 'reply')] },
     async (request: FastifyRequest, reply: FastifyReply) => {
       const { id } = request.params as { id: string };
       const parsed = ReviewReplySchema.safeParse(request.body || {});
