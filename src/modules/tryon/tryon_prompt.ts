@@ -106,11 +106,11 @@ const KINDS: Array<{ re: RegExp; kind: Kind }> = [
   { re: /trouser|pants?\b|chino|slacks|cargo|bottom/i, kind: { label: 'trousers', region: 'bottoms', hint: 'Keep the waist position, leg shape and hem length; pockets and creases stay in place.' } },
 ];
 
-const REGIONS: Record<string, { change: string; keep: string }> = {
-  tops: { change: 'the clothing on the upper body', keep: 'the clothes on the lower body, the shoes and accessories' },
-  bottoms: { change: 'the clothing on the lower body (trousers, skirt or shorts)', keep: 'the top, the shoes and accessories' },
-  dresses: { change: 'the whole outfit from the shoulders down to the hem', keep: 'the shoes and accessories' },
-  outerwear: { change: 'the outer layer: add the garment over the clothes the person already wears', keep: 'the clothes underneath, the shoes and accessories' },
+const REGIONS: Record<string, { change: string; keep: string; place: string }> = {
+  tops: { change: 'the clothing on the upper body', keep: 'the clothes on the lower body, the shoes and accessories', place: 'in place of the clothing on the upper body' },
+  bottoms: { change: 'the clothing on the lower body (trousers, skirt or shorts)', keep: 'the top, the shoes and accessories', place: 'in place of the clothing on the lower body' },
+  dresses: { change: 'the whole outfit from the shoulders down to the hem', keep: 'the shoes and accessories', place: 'in place of the whole outfit from the shoulders down to the hem' },
+  outerwear: { change: 'the outer layer: add the garment over the clothes the person already wears', keep: 'the clothes underneath, the shoes and accessories', place: 'worn over the clothes the person already has on' },
 };
 
 const REGION_ALIASES: Record<string, keyof typeof REGIONS> = { all: 'dresses' };
@@ -149,7 +149,16 @@ export interface PromptInput {
   visionNotes?: string;
   /** The shortest form of the prompt. The engines use it for a second try when the first try returned no picture. */
   compact?: boolean;
+  /**
+   * How the prompt is worded. `instruction` ("Edit the first image: ...") suits Gemini. `caption` describes the finished
+   * picture ("A photo of the person from the first image, now wearing ...") and is what FLUX edit models are built for:
+   * in a live test an instruction prompt gave the wrong garment (no sleeves, no print) while the caption copied it exactly.
+   */
+  style?: 'instruction' | 'caption';
 }
+
+/** FLUX-family edit models want a caption of the finished picture; everything else gets instructions. */
+export const promptStyleForModel = (model: string): 'instruction' | 'caption' => (/flux|klein/i.test(model) ? 'caption' : 'instruction');
 
 /** A short label for the garment: what it is, with its colour, fabric and pattern when the shop gave them. */
 function garmentLabel(garment: GarmentInfo | undefined, what: string): string {
@@ -177,6 +186,26 @@ export function buildTryOnPrompt(input: PromptInput): string {
   const styling = cleanText(input.styling, 300);
   const notes = cleanText(input.visionNotes, 400);
   const join = (lines: string[]) => lines.filter(Boolean).join(' ').replace(/\s+/g, ' ').trim();
+
+  if (input.style === 'caption') {
+    const colour = garment?.colour ? ` (${garment.colour})` : '';
+    const stays = region.keep.charAt(0).toUpperCase() + region.keep.slice(1);
+    if (input.compact) {
+      return join([
+        `A photorealistic photo of the person from the first image, with the same face, pose and background, wearing the ${what}${colour} shown in the second image ${region.place}.`,
+        fit,
+      ]);
+    }
+    return join([
+      `A photorealistic photo of the person from the first image, with the same face, hair, pose and background, now wearing the ${garmentLabel(garment, what)} shown in the second image ${region.place}.`,
+      `The ${what} keeps its exact colour, fabric, pattern, print, logo, sleeve length and cut. ${kind?.hint || ''}`,
+      fit,
+      `It has natural folds and the same lighting as the first image, and only the garment is shown, not any model or hanger from the second image.`,
+      `${stays} stay the same.`,
+      notes ? `Notes: ${notes}` : '',
+      styling ? `Extra request: ${styling}` : '',
+    ]);
+  }
 
   if (input.compact) {
     const colour = garment?.colour ? ` (${garment.colour})` : '';
