@@ -6,7 +6,8 @@ import {
   TryOnGenerationRequestedV1,
 } from '../../infrastructure/events.contract.js';
 import { logger } from '../../infrastructure/logger.js';
-import { GeminiTryOnEngine, TryOnEngineError, geminiTryOnEngine, validateImage } from './gemini.engine.js';
+import { TryOnEngineError, validateImage } from './gemini.engine.js';
+import { tryOnEngine, type TryOnEngine } from './tryon.engine.js';
 
 const EXTENSIONS: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp' };
 
@@ -16,7 +17,7 @@ const EXTENSIONS: Record<string, string> = { 'image/png': 'png', 'image/jpeg': '
  */
 export async function runTryOnPipeline(
   req: TryOnGenerationRequestedV1,
-  engine: GeminiTryOnEngine = geminiTryOnEngine
+  engine: TryOnEngine = tryOnEngine
 ): Promise<TryOnGenerationCompletedV1 | TryOnGenerationFailedV1> {
   const started = Date.now();
   const failed = (code: string, message: string, retryable: boolean): TryOnGenerationFailedV1 => ({
@@ -73,7 +74,7 @@ export async function runTryOnPipeline(
         postprocessingTimeMs: Math.max(0, finished - preparedAt - result.timings.totalMs),
         totalTimeMs: finished - started,
       },
-      model: { key: `gemini:${result.imageModel}`, version: 'v1' },
+      model: { key: `${result.provider ?? 'gemini'}:${result.imageModel}`, version: 'v1' },
     };
   } catch (err: unknown) {
     if (err instanceof TryOnEngineError) {

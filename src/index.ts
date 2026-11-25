@@ -42,7 +42,7 @@ async function bootstrap() {
 
     console.log(`💾 [Persistence Engine] ${isPrisma ? 'Prisma ORM (PostgreSQL Serverless)' : isSql ? 'Neon PostgreSQL Serverless SQL' : 'Resilient In-Memory + File Snapshot'}`);
     console.log(`🎨 [Cloudinary Storage] ${config.cloudinaryCloudName ? `Connected to '${config.cloudinaryCloudName}'` : 'Local Fallback / Memory'}`);
-    console.log(`🤖 [Virtual Try-On]     Gemini ${config.geminiApiKey ? 'ready' : 'key missing (set GEMINI_API_KEY)'}\n`);
+    console.log(`🤖 [Virtual Try-On]     mode=${config.tryonProvider}  fal ${config.falKey ? `ready (${config.falModel})` : 'key missing (set FAL_KEY)'}  |  gemini ${config.geminiApiKey ? 'ready' : 'key missing (set GEMINI_API_KEY)'}\n`);
     console.log('=============================================================\n');
   } catch (err) {
     console.error('❌ Failed to start backend service:', err);

@@ -44,6 +44,8 @@ export interface EngineResult {
   imageModel: string;
   promptModel: string;
   prompt: string;
+  /** Which service made the picture. Older callers may leave it out, which means Gemini direct. */
+  provider?: 'fal' | 'gemini';
   timings: { promptMs: number; imageMs: number; totalMs: number };
 }
 
@@ -276,6 +278,7 @@ export class GeminiTryOnEngine {
       imageModel: this.imageModel(),
       promptModel,
       prompt,
+      provider: 'gemini',
       timings: { promptMs: t1 - t0, imageMs: t2 - t1, totalMs: Date.now() - started },
     };
   }

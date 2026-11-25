@@ -4,6 +4,16 @@ Enterprise multi-tenant SaaS backend powering **Marketplace (`:3000`)**, **Brand
 
 **Virtual try-on settings:** set `GEMINI_API_KEY` in `.env`. `GEMINI_MODEL` is the vision model that writes the fitting prompt (default `gemini-3.6-flash`). `GEMINI_IMAGE_MODEL` is the model that creates the picture (default `gemini-2.5-flash-image`). If `GEMINI_MODEL` is itself an image model, it is used for the picture too.
 
+**Two providers, both configured only in `.env`** (no key or model name is stored in code):
+
+| Setting | Meaning |
+|---|---|
+| `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_IMAGE_MODEL` | Gemini direct |
+| `FAL_KEY`, `FAL_MODEL` (default `fal-ai/gemini-25-flash-image/edit`) | fal.ai |
+| `TRYON_PROVIDER` | `auto` (default): fal first when `FAL_KEY` is set, then Gemini if fal is busy, times out or rejects the key; `fal`: fal only; `gemini`: Gemini only |
+
+Blocked content or bad input is never retried on the other provider. `GET /api/v1/try-on/provider` shows which one is active, and the Super Admin AI screen can change these settings (keys are shown masked).
+
 ---
 
 ## Architecture Overview

@@ -81,6 +81,16 @@ export const config = {
   // The image model that creates the try-on picture (used when GEMINI_MODEL is not an image model).
   geminiImageModel: process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
 
+  // fal.ai hosts the same Gemini image-edit model. Every key and model name comes from the .env file, never from code.
+  falKey: process.env.FAL_KEY || '',
+  falModel: process.env.FAL_MODEL || 'fal-ai/gemini-25-flash-image/edit',
+  // Which service makes the try-on picture:
+  //   auto   = fal.ai first when FAL_KEY is set, then Gemini direct if fal fails (or Gemini only when there is no FAL_KEY)
+  //   fal    = fal.ai only      gemini = Gemini direct only
+  tryonProvider: (['auto', 'fal', 'gemini'].includes((process.env.TRYON_PROVIDER || '').trim().toLowerCase())
+    ? (process.env.TRYON_PROVIDER || '').trim().toLowerCase()
+    : 'auto') as 'auto' | 'fal' | 'gemini',
+
   // CORS: comma-separated list of allowed frontend origins (e.g. https://shop.example.com,http://localhost:3000).
   // The official domains above are always included; CORS_ORIGINS only adds extras.
   corsOrigins: Array.from(

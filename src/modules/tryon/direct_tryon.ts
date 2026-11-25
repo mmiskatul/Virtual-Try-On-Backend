@@ -4,7 +4,8 @@ import { config } from '../../infrastructure/config.js';
 import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
 import { storageAdapter } from '../../infrastructure/storage.adapter.js';
 import type { ShopperFit } from './shopper_fit.js';
-import { MAX_IMAGE_BYTES, TryOnEngineError, geminiTryOnEngine, validateImage, type EngineImage } from './gemini.engine.js';
+import { MAX_IMAGE_BYTES, TryOnEngineError, validateImage, type EngineImage } from './gemini.engine.js';
+import { tryOnEngine } from './tryon.engine.js';
 
 /**
  * One-step try-on for the marketplace routes (/try-on/direct and /try-on/submit).
@@ -119,7 +120,7 @@ export async function runDirectTryOn(input: {
   shopper?: ShopperFit;
 }) {
   const [person, garment] = await Promise.all([loadImageInput(input.personImage, 'Your photo'), loadImageInput(input.garmentImage, 'The garment photo')]);
-  const generated = await geminiTryOnEngine.generate({ person, garment, category: input.category, prompt: input.prompt, shopper: input.shopper });
+  const generated = await tryOnEngine.generate({ person, garment, category: input.category, prompt: input.prompt, shopper: input.shopper });
   const hosted = await hostResult(input.jobId, input.tenantId, generated.bytes, generated.mimeType);
   return { generated, hosted };
 }

@@ -3,7 +3,8 @@ import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import { config } from '../../infrastructure/config.js';
 import { db } from '../../infrastructure/database.js';
 import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
-import { TryOnEngineError, geminiTryOnEngine } from '../../modules/tryon/gemini.engine.js';
+import { TryOnEngineError } from '../../modules/tryon/gemini.engine.js';
+import { tryOnEngine } from '../../modules/tryon/tryon.engine.js';
 import { parseShopperFit } from '../../modules/tryon/shopper_fit.js';
 import { getDirectResult, httpStatusFor, refreshResultUrl, rememberDirectResult, runDirectTryOn } from '../../modules/tryon/direct_tryon.js';
 
@@ -100,10 +101,10 @@ function reserveForRequest(
 export async function marketplaceTryOnRoutes(app: FastifyInstance) {
   // Which engine makes the try-on pictures, and whether it is ready.
   app.get('/api/v1/try-on/provider', async () => {
-    const engine = geminiTryOnEngine.status();
+    const engine = tryOnEngine.status();
     return {
-      mode: 'gemini',
-      provider: 'gemini',
+      mode: engine.provider,
+      provider: engine.provider,
       model: engine.imageModel,
       configured: engine.configured,
       status: engine.configured ? 'ready' : 'key_required',
@@ -156,7 +157,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
         generationId: job.id,
         accessToken,
         status: 'COMPLETED',
-        provider: 'gemini',
+        provider: generated.provider ?? 'gemini',
         model: generated.imageModel,
         resultUrl: hosted.url,
         output_url: hosted.url,
