@@ -14,6 +14,16 @@ Enterprise multi-tenant SaaS backend powering **Marketplace (`:3000`)**, **Brand
 
 **The prompt** (two photos and one prompt) is built per garment in `src/modules/tryon/tryon_prompt.ts`. It reads the product's name, type, colour, fabric, pattern, specs and tags from the catalogue, works out what the garment is (shirt, jeans, dress, saree, jacket ...), and says which part of the body changes, what stays, and how that kind of garment should sit. It is kept short on purpose: long prompts made the image model answer with text and no picture far more often. If fal returns no picture, the engine asks again (up to 4 tries, alternating the full and a shorter prompt) before the Gemini fallback. A result identical to either input photo is never returned.
 
+**What the prompt adapts to, all in the one request (no second AI call):**
+- **Fit:** how far apart the shopper's size and the garment's size are, in four levels from "a little off" to "extreme", for tops, jackets, trousers and dresses, both too small and too big.
+- **Fabric:** how the fabric hangs (denim stiff, silk flowing, knit stretchy ...), from the fabric name and the catalogue's weight, stretch and see-through settings.
+- **Styling choices:** `styleOptions` in the request body (for example `["tucked_in","sleeves_rolled"]`): `tucked_in`, `untucked`, `sleeves_rolled`, `top_button_open`, `buttoned_up`, `collar_up`, `jacket_open`, `jacket_closed`, `hood_up`, `hood_down`, `belted`, `cuffed_hem`. Unknown ids and choices that do not suit the garment are ignored, and of two that contradict each other the first wins.
+- **The person's extras:** hair, hat or headscarf, glasses, jewellery and watch are always kept.
+- **Light and background:** the shopper's own background and light are kept, and light and shadows on the garment match the photo. Changing the background would need a second AI call, so it is not offered.
+- **Length:** if a prompt gets too long, minor parts go first, then the fit text is shortened, and the shopper's own choices are the last to go.
+
+**Free tools (no AI call, no cost):** `POST /api/v1/brand/try-on/prompt-preview` shows the exact prompt for a product, size and styling. Every job also stores the prompt wording version (`PROMPT_VERSION`) in its model version, and a `tryon.picture_created` log line records provider, model, version and time, so the success rate of each wording can be compared from real use.
+
 Finished pictures are saved to Cloudinary when it is configured (both the marketplace route and the brand job route) and the app shows that link.
 
 Blocked content or bad input is never retried on the other provider. `GET /api/v1/try-on/provider` shows which one is active, and the Super Admin AI screen can change these settings (keys are shown masked).
