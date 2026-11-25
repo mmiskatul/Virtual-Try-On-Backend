@@ -1,6 +1,6 @@
 import './setup_env.js';
 import { describe, expect, it } from 'vitest';
-import { buildTryOnPrompt, cleanText, inferKind, sanitizeGarmentInfo } from '../src/modules/tryon/tryon_prompt.js';
+import { buildTryOnPrompt, cleanText, inferKind, promptStyleForModel, sanitizeGarmentInfo } from '../src/modules/tryon/tryon_prompt.js';
 import { garmentInfoFromProduct } from '../src/modules/tryon/garment_info.js';
 import { FalTryOnEngine, DEFAULT_FAL_MODEL, type FalGateway } from '../src/modules/tryon/fal.engine.js';
 import type { Fabric, Product } from '../src/domain/types.js';
@@ -168,9 +168,8 @@ describe('Phase 26 - garment details come from the catalogue', () => {
     });
     const sent: string = subscribes[0].input.prompt;
     expect(subscribes[0].input.image_urls).toHaveLength(2); // two images, one prompt
-    expect(sent).toMatch(/put the trousers \(Olive, Cotton twill, fit: slim\) from the second image/);
-    expect(sent).toMatch(/replacing the clothing on the lower body/);
-    expect(sent).toMatch(/keep the top, the shoes and accessories/);
+    expect(sent).toMatch(/now wearing the trousers \(Olive, Cotton twill, fit: slim\) shown in the second image in place of the clothing on the lower body/);
+    expect(sent).toMatch(/The top, the shoes and accessories stay the same\./);
   });
 
   it('the compact prompt is much shorter but still names the garment and the body area', () => {
@@ -180,4 +179,46 @@ describe('Phase 26 - garment details come from the catalogue', () => {
     expect(short).toMatch(/put the jeans \(Indigo\) from the second image on the person, replacing the clothing on the lower body/);
     expect(short).toMatch(/Do not return the first or the second image unchanged/);
   });
+
+  it('picks the prompt style from the model: caption for FLUX, instructions for the rest', () => {
+    expect(promptStyleForModel('blackforestlabs/flux-3/klein/edit-image')).toBe('caption');
+    expect(promptStyleForModel('fal-ai/flux-2/klein/edit')).toBe('caption');
+    expect(promptStyleForModel('fal-ai/gemini-25-flash-image/edit')).toBe('instruction');
+  });
 });
+
+describe('Phase 26 - caption style (FLUX)', () => {
+  const cap = (name: string, category: string, extra: Record<string, unknown> = {}, more: Record<string, unknown> = {}) =>
+    buildTryOnPrompt({ category, garment: { name, ...extra }, style: 'caption', ...more });
+
+  it('describes the finished picture of the person from the first image wearing the garment from the second', () => {
+    const p = cap('Oxford Shirt', 'tops', { colour: 'White', fabric: 'Cotton oxford' });
+    expect(p).toMatch(/^A photorealistic photo of the person from the first image, with the same face, hair, pose and background, now wearing the shirt \/ blouse \(White, Cotton oxford\) shown in the second image in place of the clothing on the upper body\./);
+    expect(p).toMatch(/keeps its exact colour, fabric, pattern, print, logo, sleeve length and cut/);
+    expect(p).toMatch(/The clothes on the lower body, the shoes and accessories stay the same\./);
+  });
+
+  it('adapts the body area and the hint to each kind of garment', () => {
+    expect(cap('Slim Jeans', 'bottoms')).toMatch(/wearing the jeans shown in the second image in place of the clothing on the lower body/);
+    expect(cap('Maxi Dress', 'dresses')).toMatch(/in place of the whole outfit from the shoulders down to the hem/);
+    expect(cap('Wool Blazer', 'outerwear')).toMatch(/worn over the clothes the person already has on/);
+    expect(cap('Jamdani Saree', 'dresses')).toMatch(/Drape it like a saree/);
+  });
+
+  it('uses no instructions or negations, which FLUX handles badly', () => {
+    for (const p of [cap('Tee', 'tops'), cap('Jeans', 'bottoms'), cap('Dress', 'dresses'), cap('Coat', 'outerwear')]) {
+      expect(p).not.toMatch(/Edit the first image|Do not|No text|Return one/);
+    }
+  });
+
+  it('has a short form and includes the shopper fit and styling', () => {
+    const full = cap('Slim Jeans', 'bottoms', { colour: 'Indigo' });
+    const short = cap('Slim Jeans', 'bottoms', { colour: 'Indigo' }, { compact: true });
+    expect(short.length).toBeLessThan(full.length * 0.6);
+    expect(short).toMatch(/wearing the jeans \(Indigo\) shown in the second image in place of the clothing on the lower body/);
+    const styled = cap('Tee', 'tops', {}, { shopper: { gender: 'male', size: 'L' }, styling: 'tucked in' });
+    expect(styled).toMatch(/man/);
+    expect(styled).toMatch(/Extra request: tucked in/);
+  });
+});
+

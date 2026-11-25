@@ -300,13 +300,44 @@ describe('Phase 25 - never hand back an unchanged photo', () => {
     expect(result.bytes.equals(png(0x99))).toBe(true);
   });
 
-  it('the prompt tells the model to change only the clothing and copy the garment', async () => {
+  it('FLUX (the default model) gets a caption of the finished picture that keeps the person and copies the garment', async () => {
     const { engine, subscribes } = engineWith([done]);
     await engine.generate(input());
     const prompt: string = subscribes[0].input.prompt;
-    expect(prompt).toMatch(/Keep the person's face, pose and the background unchanged/);
+    expect(subscribes[0].model).toBe('blackforestlabs/flux-3/klein/edit-image');
+    expect(prompt).toMatch(/^A photorealistic photo of the person from the first image, with the same face, hair, pose and background/);
+    expect(prompt).toMatch(/shown in the second image in place of the clothing on the upper body/);
     expect(prompt).toMatch(/exact colour, fabric, pattern/);
+    expect(prompt).toMatch(/stay the same\./);
+    expect(prompt).not.toMatch(/Edit the first image|Do not return/); // no instructions or negations for FLUX
+  });
+
+  it('Gemini through fal keeps the instruction-style prompt', async () => {
+    const fake = fakeFal([done]);
+    const engine = new FalTryOnEngine({ gateway: fake.gateway, fetchImpl: fake.fetchImpl, sleep: async () => {}, apiKey: () => 'k', model: () => 'fal-ai/gemini-25-flash-image/edit' });
+    await engine.generate(input());
+    const prompt: string = fake.subscribes[0].input.prompt;
+    expect(fake.subscribes[0].model).toBe('fal-ai/gemini-25-flash-image/edit');
+    expect(prompt).toMatch(/^Edit the first image: put the/);
     expect(prompt).toMatch(/Do not return the first or the second image unchanged/);
+    expect(fake.subscribes[0].input.enable_prompt_expansion).toBeUndefined();
+  });
+
+  it('sends the FLUX options: two images, one picture, prompt expansion on, and no fixed image size', async () => {
+    const { engine, subscribes } = engineWith([done]);
+    await engine.generate(input());
+    const sent = subscribes[0].input;
+    expect(sent.image_urls).toHaveLength(2);
+    expect(sent.num_images).toBe(1);
+    expect(sent.output_format).toBe('png');
+    expect(sent.enable_prompt_expansion).toBe(true);
+    expect(sent.image_size).toBeUndefined(); // the picture keeps the first photo's size
+  });
+
+  it("refuses a picture the model's own safety check flagged, and does not retry", async () => {
+    const { engine, subscribes } = engineWith([{ data: { images: [{ url: 'https://v3.fal.media/files/result.png' }], has_nsfw_concepts: [true] } }]);
+    await expect(engine.generate(input())).rejects.toMatchObject({ code: 'CONTENT_BLOCKED', retryable: false });
+    expect(subscribes).toHaveLength(1);
   });
 });
 
