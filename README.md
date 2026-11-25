@@ -9,7 +9,7 @@ Enterprise multi-tenant SaaS backend powering **Marketplace (`:3000`)**, **Brand
 | Setting | Meaning |
 |---|---|
 | `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_IMAGE_MODEL` | Gemini direct |
-| `FAL_KEY`, `FAL_MODEL` (default `fal-ai/gemini-25-flash-image/edit`) | fal.ai |
+| `FAL_KEY`, `FAL_MODEL` (default `blackforestlabs/flux-3/klein/edit-image`, FLUX.3 Klein image editing; `fal-ai/gemini-25-flash-image/edit` also works) | fal.ai |
 | `TRYON_PROVIDER` | `auto` (default): fal first when `FAL_KEY` is set, then Gemini if fal is busy, times out or rejects the key; `fal`: fal only; `gemini`: Gemini only |
 
 **The prompt** (two photos and one prompt) is built per garment in `src/modules/tryon/tryon_prompt.ts`. It reads the product's name, type, colour, fabric, pattern, specs and tags from the catalogue, works out what the garment is (shirt, jeans, dress, saree, jacket ...), and says which part of the body changes, what stays, and how that kind of garment should sit. It is kept short on purpose: long prompts made the image model answer with text and no picture far more often. If fal returns no picture, the engine asks again (up to 4 tries, alternating the full and a shorter prompt) before the Gemini fallback. A result identical to either input photo is never returned.
