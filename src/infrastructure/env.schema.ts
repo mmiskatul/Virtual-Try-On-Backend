@@ -33,7 +33,7 @@ const envSchema = z.object({
   GEMINI_MODEL: z.string().default('gemini-3.6-flash'),
   GEMINI_IMAGE_MODEL: z.string().default('gemini-2.5-flash-image'),
   FAL_KEY: z.string().optional().default(''),
-  FAL_MODEL: z.string().default('fal-ai/gemini-25-flash-image/edit'),
+  FAL_MODEL: z.string().default('blackforestlabs/flux-3/klein/edit-image'),
   TRYON_PROVIDER: z.enum(['auto', 'fal', 'gemini']).default('auto'),
 
   // Resend Email Delivery

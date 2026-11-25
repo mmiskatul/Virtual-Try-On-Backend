@@ -45,8 +45,8 @@ export async function adminAiEngineRoutes(app: FastifyInstance) {
         availableProviders: [
           {
             id: 'fal',
-            name: 'fal.ai (Gemini 2.5 Flash Image edit)',
-            description: 'Sends the person and the garment photo to the fal-hosted Gemini image-edit model. Used first when its key is set.',
+            name: 'fal.ai (image edit: FLUX.3 Klein by default)',
+            description: 'Sends the person and the garment photo to the fal-hosted image-edit model set in FAL_MODEL. Used first when its key is set.',
             recommended: false,
             status: config.falKey ? 'ready' : 'key_required',
           },

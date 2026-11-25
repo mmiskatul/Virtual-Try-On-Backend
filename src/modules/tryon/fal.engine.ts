@@ -1,15 +1,17 @@
 import { createFalClient } from '@fal-ai/client';
 import { config } from '../../infrastructure/config.js';
 import type { ShopperFit } from './shopper_fit.js';
-import { buildTryOnPrompt, sameBytes, type GarmentInfo } from './tryon_prompt.js';
+import { buildTryOnPrompt, promptStyleForModel, sameBytes, type GarmentInfo } from './tryon_prompt.js';
 import { SUPPORTED_CATEGORIES, TryOnEngineError, sniffImage, type EngineImage, type EngineResult } from './gemini.engine.js';
 
 /**
  * Virtual try-on through fal.ai, using fal's official client (`@fal-ai/client`):
  *
- *   fal.subscribe('fal-ai/gemini-25-flash-image/edit', { input: { prompt, image_urls } })
+ *   fal.subscribe('blackforestlabs/flux-3/klein/edit-image', { input: { prompt, image_urls } })
  *
- * fal hosts Google's Gemini 2.5 Flash Image "edit" model. subscribe puts the job in fal's queue and waits for it, so a busy
+ * The model is set by FAL_MODEL. The default is FLUX.3 Klein image editing, which takes one to ten reference images and a
+ * caption of the finished picture. Any other fal image-edit model with the same input shape (for example
+ * fal-ai/gemini-25-flash-image/edit) also works. subscribe puts the job in fal's queue and waits for it, so a busy
  * moment is a short wait and not a failure. We upload the shopper photo and the garment photo to fal's file storage first
  * (falling back to inline data URLs), then download the finished picture.
  *
@@ -17,7 +19,7 @@ import { SUPPORTED_CATEGORIES, TryOnEngineError, sniffImage, type EngineImage, t
  * clear reason. A fake or composited picture is never returned.
  */
 
-export const DEFAULT_FAL_MODEL = 'fal-ai/gemini-25-flash-image/edit';
+export const DEFAULT_FAL_MODEL = 'blackforestlabs/flux-3/klein/edit-image';
 /** How long one fal job may take before we give up on it (the apps wait up to 120 s, and Gemini may still need time as a fallback). */
 export const FAL_JOB_TIMEOUT_MS = 75_000;
 const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
@@ -175,14 +177,27 @@ export class FalTryOnEngine {
     for (let attempt = 0; attempt < FAL_MAX_ATTEMPTS; attempt += 1) {
       // Two photos and one prompt: the prompt adapts to what the garment is (shirt, jeans, dress, saree ...).
       // Tries alternate between the full prompt and a much shorter one, since either can be the one the model accepts.
-      const prompt = buildTryOnPrompt({ category, garment: input.garmentInfo, shopper: input.shopper, styling: input.prompt, compact: attempt % 2 === 1 });
+      const model = this.imageModel();
+      const style = promptStyleForModel(model);
+      const prompt = buildTryOnPrompt({ category, garment: input.garmentInfo, shopper: input.shopper, styling: input.prompt, compact: attempt % 2 === 1, style });
       try {
         const imageUrls = await Promise.all([this.toUrl(input.person), this.toUrl(input.garment)]);
         const { data } = await this.gateway.subscribe(
-          this.imageModel(),
-          { prompt, image_urls: imageUrls, num_images: 1, output_format: 'png' },
+          model,
+          {
+            prompt,
+            image_urls: imageUrls,
+            num_images: 1,
+            output_format: 'png',
+            // FLUX edit models expand the caption using what is in the photos. The picture keeps the first photo's size.
+            ...(style === 'caption' ? { enable_prompt_expansion: true } : {}),
+          },
           { timeoutMs: this.jobTimeoutMs }
         );
+        // The model's own safety check flagged the picture: it is blank or replaced, so do not hand it on.
+        if (Array.isArray(data?.has_nsfw_concepts) && data.has_nsfw_concepts[0] === true) {
+          throw new TryOnEngineError('CONTENT_BLOCKED', 'This photo or garment could not be used. Please try a different photo.', false);
+        }
         const url: string | undefined = data?.images?.[0]?.url;
         if (!url) throw new TryOnEngineError('NO_IMAGE_RETURNED', 'No picture was created. Please try again.', true);
 
