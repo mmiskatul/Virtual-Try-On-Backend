@@ -1,6 +1,18 @@
 import type { Fabric, Product } from '../../domain/types.js';
 import { db } from '../../infrastructure/database.js';
-import { cleanText, type GarmentInfo } from './tryon_prompt.js';
+import { cleanText, type FabricTraits, type GarmentInfo } from './tryon_prompt.js';
+
+/** How the garment's fabric behaves (weight, stretch, see-through), taken from the catalogue's fabric records. */
+function fabricTraitsOf(fabrics: Fabric[]): FabricTraits | undefined {
+  const traits: FabricTraits = {};
+  for (const f of fabrics) {
+    if (!traits.stretch && f.stretch) traits.stretch = f.stretch;
+    if (!traits.thickness && f.thickness) traits.thickness = f.thickness;
+    if (!traits.transparency && f.transparency) traits.transparency = f.transparency;
+    if (!traits.weightGsm && f.weightGsm) traits.weightGsm = f.weightGsm;
+  }
+  return Object.keys(traits).length ? traits : undefined;
+}
 
 /**
  * Collect what the shop knows about a garment, from the product record, so the try-on prompt can describe it.
@@ -36,6 +48,7 @@ export function garmentInfoFromProduct(
     type: cleanText(product.subCategory || product.category, 60),
     colour: colour || undefined,
     fabric: cleanText(fabric, 120) || undefined,
+    fabricTraits: fabricTraitsOf(fabrics),
     pattern: cleanText(pattern, 60) || undefined,
     details: cleanText(product.shortDescription || product.description, 240) || undefined,
     specs: Object.keys(specs).length ? specs : undefined,
