@@ -3,6 +3,7 @@ import { logger } from '../../infrastructure/logger.js';
 import { TryOnEngineError, geminiTryOnEngine, type EngineImage, type EngineResult, type GeminiTryOnEngine } from './gemini.engine.js';
 import { falTryOnEngine, type FalTryOnEngine } from './fal.engine.js';
 import type { ShopperFit } from './shopper_fit.js';
+import type { GarmentInfo } from './tryon_prompt.js';
 
 export interface TryOnInput {
   person: EngineImage;
@@ -10,6 +11,8 @@ export interface TryOnInput {
   category: string;
   prompt?: string;
   shopper?: ShopperFit;
+  /** What the shop knows about the garment, so the prompt can describe it. */
+  garmentInfo?: GarmentInfo;
 }
 
 /** What the pipeline needs from an engine. Both the Gemini engine and the fal engine fit this. */
