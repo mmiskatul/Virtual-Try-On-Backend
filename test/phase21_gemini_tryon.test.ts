@@ -112,7 +112,7 @@ describe('Gemini try-on engine (runs inside the backend)', () => {
     });
 
     it('tries again when Gemini is busy, and gives up with a retryable error', async () => {
-      const busy = makeEngine([textReply('p'), { status: 503 }, { status: 503 }, imageReply(png())]);
+      const busy = makeEngine([textReply('p'), { status: 503 }, { status: 503 }, imageReply(png(9, 9))]);
       const ok = await busy.engine.generate(input());
       expect(ok.bytes.length).toBeGreaterThan(0);
       expect(busy.calls).toHaveLength(4); // 1 prompt + 3 picture tries

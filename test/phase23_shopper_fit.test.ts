@@ -108,7 +108,7 @@ describe('The shopper chooses man or woman and their size, and the picture fits 
       const engine = new GeminiTryOnEngine({
         fetchImpl: (async (_url: string, init: RequestInit) => {
           calls.push(JSON.parse(String(init.body)));
-          const reply = i === 0 ? { candidates: [{ content: { parts: [{ text: 'p' }] } }] } : { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: png().toString('base64') } }] } }] };
+          const reply = i === 0 ? { candidates: [{ content: { parts: [{ text: 'p' }] } }] } : { candidates: [{ content: { parts: [{ inlineData: { mimeType: 'image/png', data: png(7, 7, 0x66).toString('base64') } }] } }] };
           i += 1;
           return new Response(JSON.stringify(reply), { status: 200 });
         }) as unknown as typeof fetch,

@@ -116,15 +116,13 @@ describe('Phase 4: Async Try-On Pipeline (Upload Intent -> Jobs -> SSE/Poll -> S
     const jobData = JSON.parse(jobRes.body).data;
     expect(jobData.jobId).toBeTruthy();
 
-    // Wait briefly for setImmediate async AI dispatch + settlement
-    await new Promise((r) => setTimeout(r, 80));
-
-    // 3. Poll job -> COMPLETED with signed download URL
-    const statusRes = await app.inject({
-      method: 'GET',
-      url: `/api/v1/try-on/jobs/${jobData.jobId}`,
-      headers: { Authorization: `Bearer ${custToken}` },
-    });
+    // 3. Poll job -> COMPLETED with signed download URL. The AI step runs after the request returns,
+    // so wait for it (up to 3 seconds) instead of guessing a fixed delay that can be too short on a busy machine.
+    let statusRes = await app.inject({ method: 'GET', url: `/api/v1/try-on/jobs/${jobData.jobId}`, headers: { Authorization: `Bearer ${custToken}` } });
+    for (let i = 0; i < 60 && JSON.parse(statusRes.body)?.data?.status !== 'COMPLETED'; i += 1) {
+      await new Promise((r) => setTimeout(r, 50));
+      statusRes = await app.inject({ method: 'GET', url: `/api/v1/try-on/jobs/${jobData.jobId}`, headers: { Authorization: `Bearer ${custToken}` } });
+    }
     expect(statusRes.statusCode).toBe(200);
     const statusBody = JSON.parse(statusRes.body).data;
     expect(statusBody.status).toBe('COMPLETED');
