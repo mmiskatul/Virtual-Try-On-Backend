@@ -13,6 +13,8 @@ export interface TryOnInput {
   shopper?: ShopperFit;
   /** What the shop knows about the garment, so the prompt can describe it. */
   garmentInfo?: GarmentInfo;
+  /** Styling choices (ids from STYLE_OPTIONS), for example tucked_in or sleeves_rolled. */
+  styleOptions?: string[];
 }
 
 /** What the pipeline needs from an engine. Both the Gemini engine and the fal engine fit this. */

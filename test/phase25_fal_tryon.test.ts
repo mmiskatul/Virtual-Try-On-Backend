@@ -306,8 +306,8 @@ describe('Phase 25 - never hand back an unchanged photo', () => {
     const prompt: string = subscribes[0].input.prompt;
     expect(subscribes[0].model).toBe('blackforestlabs/flux-3/klein/edit-image');
     expect(prompt).toMatch(/^A photorealistic photo of the person from the first image, with the same face, hair, pose and background/);
-    expect(prompt).toMatch(/shown in the second image in place of the clothing on the upper body/);
-    expect(prompt).toMatch(/exact colour, fabric, pattern/);
+    expect(prompt).toMatch(/from the second image in place of the clothing on the upper body/);
+    expect(prompt).toMatch(/matches the second image exactly in colour, fabric, pattern, print/);
     expect(prompt).toMatch(/stay the same\./);
     expect(prompt).not.toMatch(/Edit the first image|Do not return/); // no instructions or negations for FLUX
   });

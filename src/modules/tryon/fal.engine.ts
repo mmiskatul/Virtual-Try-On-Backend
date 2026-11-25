@@ -1,7 +1,7 @@
 import { createFalClient } from '@fal-ai/client';
 import { config } from '../../infrastructure/config.js';
 import type { ShopperFit } from './shopper_fit.js';
-import { buildTryOnPrompt, promptStyleForModel, sameBytes, type GarmentInfo } from './tryon_prompt.js';
+import { PROMPT_VERSION, buildTryOnPrompt, promptStyleForModel, sameBytes, type GarmentInfo } from './tryon_prompt.js';
 import { SUPPORTED_CATEGORIES, TryOnEngineError, sniffImage, type EngineImage, type EngineResult } from './gemini.engine.js';
 
 /**
@@ -163,7 +163,7 @@ export class FalTryOnEngine {
     return dataUrl(img);
   }
 
-  public async generate(input: { person: EngineImage; garment: EngineImage; category: string; prompt?: string; shopper?: ShopperFit; garmentInfo?: GarmentInfo }): Promise<EngineResult> {
+  public async generate(input: { person: EngineImage; garment: EngineImage; category: string; prompt?: string; shopper?: ShopperFit; garmentInfo?: GarmentInfo; styleOptions?: string[] }): Promise<EngineResult> {
     const started = Date.now();
     const category = (input.category || 'tops').toLowerCase();
     if (!(SUPPORTED_CATEGORIES as readonly string[]).includes(category)) {
@@ -179,7 +179,7 @@ export class FalTryOnEngine {
       // Tries alternate between the full prompt and a much shorter one, since either can be the one the model accepts.
       const model = this.imageModel();
       const style = promptStyleForModel(model);
-      const prompt = buildTryOnPrompt({ category, garment: input.garmentInfo, shopper: input.shopper, styling: input.prompt, compact: attempt % 2 === 1, style });
+      const prompt = buildTryOnPrompt({ category, garment: input.garmentInfo, shopper: input.shopper, styling: input.prompt, styleOptions: input.styleOptions, compact: attempt % 2 === 1, style });
       try {
         const imageUrls = await Promise.all([this.toUrl(input.person), this.toUrl(input.garment)]);
         const { data } = await this.gateway.subscribe(
@@ -218,6 +218,7 @@ export class FalTryOnEngine {
           promptModel: 'direct',
           prompt,
           provider: 'fal',
+          promptVersion: PROMPT_VERSION,
           timings: { promptMs: 0, imageMs: done - started, totalMs: done - started },
         };
       } catch (err: unknown) {

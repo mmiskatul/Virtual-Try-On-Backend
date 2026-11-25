@@ -1,6 +1,6 @@
 import { config } from '../../infrastructure/config.js';
 import { fitInstruction, type ShopperFit } from './shopper_fit.js';
-import { buildTryOnPrompt, describeGarment, inferKind, sameBytes, sanitizeGarmentInfo, type GarmentInfo } from './tryon_prompt.js';
+import { PROMPT_VERSION, buildTryOnPrompt, describeGarment, inferKind, sameBytes, sanitizeGarmentInfo, type GarmentInfo } from './tryon_prompt.js';
 
 /**
  * The virtual try-on engine. It asks Google Gemini to dress the person in the garment and gives back the image.
@@ -47,6 +47,8 @@ export interface EngineResult {
   prompt: string;
   /** Which service made the picture. Older callers may leave it out, which means Gemini direct. */
   provider?: 'fal' | 'gemini';
+  /** The wording version of the prompt that made this picture (see PROMPT_VERSION). */
+  promptVersion?: string;
   timings: { promptMs: number; imageMs: number; totalMs: number };
 }
 
@@ -219,9 +221,9 @@ export class GeminiTryOnEngine {
   }
 
   /** Step 2: create the picture. Retries a couple of times when Gemini is busy. */
-  private async makeImage(person: EngineImage, garment: EngineImage, category: string, notes: string, shopper?: ShopperFit, garmentInfo?: GarmentInfo): Promise<{ bytes: Buffer; mimeType: string }> {
+  private async makeImage(person: EngineImage, garment: EngineImage, category: string, notes: string, shopper?: ShopperFit, garmentInfo?: GarmentInfo, styleOptions?: string[]): Promise<{ bytes: Buffer; mimeType: string }> {
     // Two photos and one prompt: the prompt adapts to what the garment is (shirt, jeans, dress, saree ...).
-    const instruction = buildTryOnPrompt({ category, garment: garmentInfo, shopper, visionNotes: notes });
+    const instruction = buildTryOnPrompt({ category, garment: garmentInfo, shopper, visionNotes: notes, styleOptions });
     const body = {
       contents: [{ parts: [{ text: instruction }, inline(person), inline(garment)] }],
       generationConfig: { responseModalities: ['IMAGE'] },
@@ -262,7 +264,7 @@ export class GeminiTryOnEngine {
     throw lastError ?? new TryOnEngineError('UPSTREAM_ERROR', 'Could not create the picture.', true);
   }
 
-  public async generate(input: { person: EngineImage; garment: EngineImage; category: string; prompt?: string; shopper?: ShopperFit; garmentInfo?: GarmentInfo }): Promise<EngineResult> {
+  public async generate(input: { person: EngineImage; garment: EngineImage; category: string; prompt?: string; shopper?: ShopperFit; garmentInfo?: GarmentInfo; styleOptions?: string[] }): Promise<EngineResult> {
     const started = Date.now();
     const category = (input.category || 'tops').toLowerCase();
     if (!(SUPPORTED_CATEGORIES as readonly string[]).includes(category)) {
@@ -275,7 +277,7 @@ export class GeminiTryOnEngine {
     const t0 = Date.now();
     const { prompt, model: promptModel } = await this.writePrompt(input.person, input.garment, category, input.prompt, input.shopper, input.garmentInfo);
     const t1 = Date.now();
-    const image = await this.makeImage(input.person, input.garment, category, prompt, input.shopper, input.garmentInfo);
+    const image = await this.makeImage(input.person, input.garment, category, prompt, input.shopper, input.garmentInfo, input.styleOptions);
     const t2 = Date.now();
 
     const info = sniffImage(image.bytes);
@@ -288,6 +290,7 @@ export class GeminiTryOnEngine {
       promptModel,
       prompt,
       provider: 'gemini',
+      promptVersion: PROMPT_VERSION,
       timings: { promptMs: t1 - t0, imageMs: t2 - t1, totalMs: Date.now() - started },
     };
   }
