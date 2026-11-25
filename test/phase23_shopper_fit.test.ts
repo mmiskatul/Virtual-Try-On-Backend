@@ -3,7 +3,7 @@ import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from '../src/server.js';
 import { seedTestUsers } from './helpers.js';
 import { GeminiTryOnEngine } from '../src/modules/tryon/gemini.engine.js';
-import { compareSizes, fitInstruction, parseShopperFit } from '../src/modules/tryon/shopper_fit.js';
+import { compareSizes, fitInstruction, parseShopperFit, sizeGapLevel } from '../src/modules/tryon/shopper_fit.js';
 import { setCustomAiDispatcher } from '../src/modules/tryon/tryon.orchestrator.js';
 import type { TryOnGenerationRequestedV1 } from '../src/infrastructure/events.contract.js';
 
@@ -47,13 +47,100 @@ describe('The shopper chooses man or woman and their size, and the picture fits 
       expect(same).toContain('true to size');
       const bigger = fitInstruction({ size: 'M', garmentSize: 'XL' }, 'tops');
       expect(bigger).toContain('2 sizes bigger');
-      expect(bigger).toContain('looser');
+      expect(bigger).toContain('baggy');
       const smaller = fitInstruction({ size: 'L', garmentSize: 'M' }, 'tops');
       expect(smaller).toContain('1 size smaller');
       expect(smaller).toContain('tighter');
       expect(fitInstruction({ size: '32', garmentSize: '36' }, 'bottoms')).toContain('4 inches bigger');
       expect(fitInstruction({ garmentSize: 'M' }, 'tops')).toContain('garment shown is size M');
       expect(fitInstruction({ size: 'M', garmentSize: '32' }, 'tops')).toContain('size 32');
+    });
+
+    it('shows a size that is too small as tight, and gets worse the further apart the sizes are', () => {
+      // wears XXL, chose XL: one size too small
+      const one = fitInstruction({ size: 'XXL', garmentSize: 'XL' }, 'tops');
+      expect(one).toContain('1 size smaller than their size');
+      expect(one).toContain('tighter than it should');
+      expect(one).toContain('pulls across the chest, shoulders and belly');
+      expect(one).toContain("keep the person's own body unchanged");
+      expect(one).toContain('Show this size difference clearly and realistically');
+      // two sizes
+      const two = fitInstruction({ size: 'XXL', garmentSize: 'L' }, 'tops');
+      expect(two).toContain('clearly too tight');
+      expect(two).toContain('strain wrinkles');
+      // three sizes
+      const three = fitInstruction({ size: 'XXL', garmentSize: 'M' }, 'tops');
+      expect(three).toContain('far too small and looks bad on them');
+      expect(three).toContain('hem rides high up the torso');
+      expect(three).toContain('Make the size mismatch obvious at first glance');
+      // four or more sizes: extreme
+      const four = fitInstruction({ size: 'XXL', garmentSize: 'S' }, 'tops');
+      expect(four).toContain('extremely too small');
+      expect(four).toContain('like a crop top');
+      expect(four).toContain('Make the size mismatch unmistakable at first glance');
+    });
+
+    it('shows a size that is too big as baggy and oversized, and gets worse the further apart the sizes are', () => {
+      // wears XL, chose XXL: one size too big
+      const one = fitInstruction({ size: 'XL', garmentSize: 'XXL' }, 'tops');
+      expect(one).toContain('1 size bigger than their size');
+      expect(one).toContain('looser than it should');
+      expect(one).toContain('shoulder seams sit a little off the shoulders');
+      const two = fitInstruction({ size: 'XL', garmentSize: '3XL' }, 'tops');
+      expect(two).toContain('clearly too big');
+      expect(two).toContain('sleeves reach the hands');
+      const three = fitInstruction({ size: 'S', garmentSize: 'XL' }, 'tops');
+      expect(three).toContain('3 sizes bigger');
+      expect(three).toContain('far too big and looks bad on them');
+      expect(three).toContain('sleeves cover the hands');
+      const extreme = fitInstruction({ size: 'XS', garmentSize: '4XL' }, 'tops');
+      expect(extreme).toContain('extremely oversized');
+      expect(extreme).toContain('swallows the body');
+      expect(extreme).toContain('Make the size mismatch unmistakable at first glance');
+    });
+
+    it('has a distinct description for every level, both ways, for every kind of garment', () => {
+      for (const category of ['tops', 'outerwear', 'bottoms', 'dresses']) {
+        for (const [mine, garments] of [['XL', ['L', 'M', 'S', 'XXS']], ['M', ['L', 'XL', 'XXL', '3XL']]] as const) {
+          const texts = garments.map((g) => fitInstruction({ size: mine, garmentSize: g }, category));
+          expect(new Set(texts).size).toBe(4); // four different pictures for four different gaps
+        }
+      }
+      // the extreme level is always called extreme
+      expect(fitInstruction({ size: 'XL', garmentSize: 'XXS' }, 'bottoms')).toContain('extremely too small');
+      expect(fitInstruction({ size: 'S', garmentSize: '4XL' }, 'dresses')).toContain('extremely oversized');
+    });
+
+    it('describes the wrong fit in the right place for trousers, dresses and jackets', () => {
+      expect(fitInstruction({ size: '34', garmentSize: '30' }, 'bottoms')).toContain('waistband digs in');
+      expect(fitInstruction({ size: '32', garmentSize: '36' }, 'bottoms')).toContain('hems pool over the shoes');
+      expect(fitInstruction({ size: 'L', garmentSize: 'M' }, 'dresses')).toContain('bust, waist and hips');
+      expect(fitInstruction({ size: 'M', garmentSize: 'L' }, 'dresses')).toContain('hem sits a little long');
+      // a jacket is described by how it closes and sits on the shoulders, not like a t-shirt
+      expect(fitInstruction({ size: 'L', garmentSize: 'M' }, 'outerwear')).toContain('shoulders and chest');
+      expect(fitInstruction({ size: 'L', garmentSize: 'XXS' }, 'outerwear')).toContain('cannot close at the front');
+      expect(fitInstruction({ size: 'S', garmentSize: '4XL' }, 'outerwear')).toContain('like a coat several sizes too big');
+      // the same size is neither tight nor loose
+      expect(fitInstruction({ size: 'L', garmentSize: 'L' }, 'tops')).toContain('neither tight nor loose');
+    });
+
+    it('two waist inches count as one size when judging how far off the garment is', () => {
+      expect(fitInstruction({ size: '32', garmentSize: '34' }, 'bottoms')).toContain('fits looser than it should'); // 2 inches: level 1
+      expect(fitInstruction({ size: '32', garmentSize: '36' }, 'bottoms')).toContain('clearly too big'); // 4 inches: level 2
+      expect(fitInstruction({ size: '32', garmentSize: '38' }, 'bottoms')).toContain('far too big'); // 6 inches: level 3
+      expect(fitInstruction({ size: '32', garmentSize: '40' }, 'bottoms')).toContain('extremely oversized'); // 8 inches: level 4
+      expect(fitInstruction({ size: '38', garmentSize: '30' }, 'bottoms')).toContain('extremely too small');
+    });
+
+    it('sizeGapLevel runs from 1 to 4 and never beyond', () => {
+      expect(sizeGapLevel({ step: 1, unit: 'size' })).toBe(1);
+      expect(sizeGapLevel({ step: -2, unit: 'size' })).toBe(2);
+      expect(sizeGapLevel({ step: 3, unit: 'size' })).toBe(3);
+      expect(sizeGapLevel({ step: -4, unit: 'size' })).toBe(4);
+      expect(sizeGapLevel({ step: 8, unit: 'size' })).toBe(4);
+      expect(sizeGapLevel({ step: 1, unit: 'inch' })).toBe(1);
+      expect(sizeGapLevel({ step: 5, unit: 'inch' })).toBe(3);
+      expect(sizeGapLevel({ step: -20, unit: 'inch' })).toBe(4);
     });
 
     it('writes a plain fitting instruction', () => {
