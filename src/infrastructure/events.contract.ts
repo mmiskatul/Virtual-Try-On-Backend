@@ -29,6 +29,20 @@ export const TryOnGenerationRequestedV1Schema = z.object({
     gender: z.enum(['female', 'male']).optional(),
     size: z.string().max(8).optional(),
     garmentSize: z.string().max(8).optional(),
+    // What the shop knows about the garment (read from the catalogue on the server), so the prompt can describe it.
+    garmentInfo: z
+      .object({
+        name: z.string().max(100).optional(),
+        type: z.string().max(60).optional(),
+        colour: z.string().max(40).optional(),
+        fabric: z.string().max(120).optional(),
+        pattern: z.string().max(60).optional(),
+        details: z.string().max(240).optional(),
+        specs: z.record(z.string(), z.string().max(60)).optional(),
+        audience: z.enum(['women', 'men', 'both']).optional(),
+        tags: z.array(z.string().max(30)).max(10).optional(),
+      })
+      .optional(),
   }),
 });
 
@@ -43,6 +57,8 @@ export const TryOnGenerationCompletedV1Schema = z.object({
   result: StorageObjectRefSchema.extend({
     width: z.number().int().positive().optional(),
     height: z.number().int().positive().optional(),
+    /** A permanent link to the picture on Cloudinary, when Cloudinary is set up. The private copy is kept too. */
+    publicUrl: z.string().url().optional(),
   }),
   metrics: z.object({
     queueTimeMs: z.number().nonnegative().default(0),

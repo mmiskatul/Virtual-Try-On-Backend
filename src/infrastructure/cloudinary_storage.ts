@@ -15,6 +15,11 @@ export class CloudinaryStorage {
   }
 
   private init() {
+    // Automated tests must never upload to the real Cloudinary account that a developer's .env points at.
+    if (process.env.NODE_ENV === 'test' && process.env.ALLOW_CLOUDINARY_IN_TESTS !== 'true') {
+      this.configured = false;
+      return;
+    }
     if (config.cloudinaryCloudName && config.cloudinaryApiKey && config.cloudinaryApiSecret) {
       cloudinary.config({
         cloud_name: config.cloudinaryCloudName,

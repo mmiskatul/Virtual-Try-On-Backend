@@ -18,6 +18,7 @@ import { enqueueOutboxEvent } from '../../infrastructure/outbox.js';
 import { redisAdapter } from '../../infrastructure/redis.js';
 import { billingCreditService } from '../billing/billing.service.js';
 import { runTryOnPipeline } from './tryon.pipeline.js';
+import { garmentInfoFromProduct } from './garment_info.js';
 
 export type ExtendedJobStatus = 'QUEUED' | 'PROCESSING' | 'COMPLETED' | 'FAILED' | 'CANCELLED';
 
@@ -32,6 +33,8 @@ export interface AsyncJobMeta {
   garmentObjectKey: string;
   resultBucket?: LogicalBucket;
   resultObjectKey?: string;
+  /** The permanent Cloudinary link to the picture, when there is one. */
+  resultPublicUrl?: string;
   modelKey: string;
   modelVersion: string;
   quality: 'fast_preview' | 'standard' | 'high_fidelity';
@@ -329,6 +332,13 @@ export class TryOnOrchestrator {
     }
 
     const jobId = reserve.job.id;
+    // Describe the garment from the catalogue (name, type, colour, fabric ...) so the prompt fits this exact product.
+    const garmentInfo = garmentInfoFromProduct(product, {
+      imageUrl: input.garmentImageUrl,
+      fabrics: (product.fabricIds || [])
+        .map((id) => db.getFabricById(id, product.tenantId))
+        .filter((f): f is NonNullable<ReturnType<typeof db.getFabricById>> => Boolean(f)),
+    });
     let personRef: { bucket: LogicalBucket; objectKey: string; contentType: string };
     let garmentRef: { bucket: LogicalBucket; objectKey: string; contentType: string };
 
@@ -421,6 +431,7 @@ export class TryOnOrchestrator {
         ...(input.gender ? { gender: input.gender } : {}),
         ...(input.size ? { size: input.size } : {}),
         ...(input.garmentSize ? { garmentSize: input.garmentSize } : {}),
+        ...(garmentInfo ? { garmentInfo } : {}),
       },
     });
 
@@ -550,6 +561,7 @@ export class TryOnOrchestrator {
         meta.status = 'COMPLETED';
         meta.resultBucket = event.result.bucket as LogicalBucket;
         meta.resultObjectKey = event.result.objectKey;
+        meta.resultPublicUrl = event.result.publicUrl;
         meta.modelKey = event.model.key;
         meta.modelVersion = event.model.version;
         meta.latencyMs = Math.round(event.metrics.totalTimeMs);
@@ -575,11 +587,10 @@ export class TryOnOrchestrator {
         }
       }
 
-      const signed = await storageAdapter.createSignedDownloadUrl(
-        event.result.bucket as LogicalBucket,
-        event.result.objectKey,
-        300
-      );
+      // Prefer the permanent Cloudinary link; otherwise a short-lived link to the private copy.
+      const signed = event.result.publicUrl
+        ? { url: event.result.publicUrl, expiresAt: undefined }
+        : await storageAdapter.createSignedDownloadUrl(event.result.bucket as LogicalBucket, event.result.objectKey, 300);
 
       this.emitStatus(event.generationId, {
         jobId: event.generationId,
@@ -662,7 +673,9 @@ export class TryOnOrchestrator {
     const status = meta?.status || (job?.status as ExtendedJobStatus) || 'QUEUED';
     let resultUrl: string | undefined;
     let resultExpiresAt: string | undefined;
-    if (status === 'COMPLETED' && meta?.resultBucket && meta?.resultObjectKey) {
+    if (status === 'COMPLETED' && meta?.resultPublicUrl) {
+      resultUrl = meta.resultPublicUrl;
+    } else if (status === 'COMPLETED' && meta?.resultBucket && meta?.resultObjectKey) {
       const signed = await storageAdapter.createSignedDownloadUrl(meta.resultBucket, meta.resultObjectKey, 300);
       resultUrl = signed.url;
       resultExpiresAt = signed.expiresAt;

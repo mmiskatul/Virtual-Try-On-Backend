@@ -6,6 +6,8 @@ import {
   TryOnGenerationRequestedV1,
 } from '../../infrastructure/events.contract.js';
 import { logger } from '../../infrastructure/logger.js';
+import { config } from '../../infrastructure/config.js';
+import { cloudinaryStorage } from '../../infrastructure/cloudinary_storage.js';
 import { TryOnEngineError, validateImage } from './gemini.engine.js';
 import { tryOnEngine, type TryOnEngine } from './tryon.engine.js';
 
@@ -46,11 +48,20 @@ export async function runTryOnPipeline(
       category: req.options.category,
       prompt: req.options.prompt,
       shopper: { gender: req.options.gender, size: req.options.size, garmentSize: req.options.garmentSize },
+      garmentInfo: req.options.garmentInfo,
     });
 
     const ext = EXTENSIONS[result.mimeType] || 'png';
     const objectKey = `${req.tenantId}/${req.generationId}/result.${ext}`;
     await storageAdapter.upload('generated-results', objectKey, result.bytes, result.mimeType);
+    // Also save the finished picture on Cloudinary, so the apps show a permanent link and not one that expires.
+    const publicUrl = cloudinaryStorage.isConfigured()
+      ? await cloudinaryStorage.uploadBuffer(result.bytes, {
+          publicId: `tryon_res_${req.generationId}`,
+          folder: `${config.cloudinaryFolder}/results`,
+          tags: ['virtual-try-on', 'generated-result', req.generationId],
+        })
+      : null;
     const finished = Date.now();
 
     return {
@@ -66,6 +77,7 @@ export async function runTryOnPipeline(
         objectKey,
         contentType: result.mimeType,
         ...(result.width && result.height ? { width: result.width, height: result.height } : {}),
+        ...(publicUrl ? { publicUrl } : {}),
       },
       metrics: {
         queueTimeMs: 0,
