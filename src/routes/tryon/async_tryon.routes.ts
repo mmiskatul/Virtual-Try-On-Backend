@@ -170,6 +170,10 @@ export async function asyncTryOnRoutes(app: FastifyInstance) {
       return reply.status(404).send({ error: 'NotFound', message: 'Try-on job not found.' });
     }
 
+    // writeHead bypasses Fastify, so carry over the CORS and security headers it already set.
+    for (const [name, value] of Object.entries(reply.getHeaders())) {
+      if (value !== undefined) reply.raw.setHeader(name, value);
+    }
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache, no-transform',
