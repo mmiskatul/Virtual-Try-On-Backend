@@ -29,6 +29,8 @@ export const TryOnGenerationRequestedV1Schema = z.object({
     gender: z.enum(['female', 'male']).optional(),
     size: z.string().max(8).optional(),
     garmentSize: z.string().max(8).optional(),
+    // Styling the shopper chose (for example tucked_in, sleeves_rolled). Unknown ids are ignored when the prompt is built.
+    styleOptions: z.array(z.string().max(30)).max(12).optional(),
     // What the shop knows about the garment (read from the catalogue on the server), so the prompt can describe it.
     garmentInfo: z
       .object({
@@ -36,6 +38,14 @@ export const TryOnGenerationRequestedV1Schema = z.object({
         type: z.string().max(60).optional(),
         colour: z.string().max(40).optional(),
         fabric: z.string().max(120).optional(),
+        fabricTraits: z
+          .object({
+            stretch: z.enum(['NONE', 'LOW', 'MEDIUM', 'HIGH']).optional(),
+            thickness: z.enum(['LIGHT', 'MEDIUM', 'HEAVY']).optional(),
+            transparency: z.enum(['OPAQUE', 'SEMI_SHEER', 'SHEER']).optional(),
+            weightGsm: z.number().positive().max(2000).optional(),
+          })
+          .optional(),
         pattern: z.string().max(60).optional(),
         details: z.string().max(240).optional(),
         specs: z.record(z.string(), z.string().max(60)).optional(),

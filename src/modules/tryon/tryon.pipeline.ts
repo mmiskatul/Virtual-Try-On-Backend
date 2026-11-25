@@ -49,8 +49,13 @@ export async function runTryOnPipeline(
       prompt: req.options.prompt,
       shopper: { gender: req.options.gender, size: req.options.size, garmentSize: req.options.garmentSize },
       garmentInfo: req.options.garmentInfo,
+      styleOptions: req.options.styleOptions,
     });
 
+    logger.info(
+      { generationId: req.generationId, provider: result.provider, model: result.imageModel, promptVersion: result.promptVersion, ms: result.timings.totalMs, category: req.options.category },
+      'tryon.picture_created'
+    );
     const ext = EXTENSIONS[result.mimeType] || 'png';
     const objectKey = `${req.tenantId}/${req.generationId}/result.${ext}`;
     await storageAdapter.upload('generated-results', objectKey, result.bytes, result.mimeType);
@@ -86,7 +91,8 @@ export async function runTryOnPipeline(
         postprocessingTimeMs: Math.max(0, finished - preparedAt - result.timings.totalMs),
         totalTimeMs: finished - started,
       },
-      model: { key: `${result.provider ?? 'gemini'}:${result.imageModel}`, version: 'v1' },
+      // The version slot holds the prompt wording version, so success rates can be compared per wording from real use.
+      model: { key: `${result.provider ?? 'gemini'}:${result.imageModel}`, version: result.promptVersion ?? 'v1' },
     };
   } catch (err: unknown) {
     if (err instanceof TryOnEngineError) {

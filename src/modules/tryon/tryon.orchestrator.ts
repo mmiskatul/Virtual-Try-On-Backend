@@ -241,6 +241,8 @@ export class TryOnOrchestrator {
     gender?: 'female' | 'male';
     size?: string;
     garmentSize?: string;
+    /** Styling choices (ids such as tucked_in or sleeves_rolled). */
+    styleOptions?: string[];
     idempotencyKey?: string;
     /** Shopper's answer to the consent box when sending a photo by link instead of an upload. */
     consentGiven?: boolean;
@@ -431,6 +433,7 @@ export class TryOnOrchestrator {
         ...(input.gender ? { gender: input.gender } : {}),
         ...(input.size ? { size: input.size } : {}),
         ...(input.garmentSize ? { garmentSize: input.garmentSize } : {}),
+        ...(input.styleOptions?.length ? { styleOptions: input.styleOptions } : {}),
         ...(garmentInfo ? { garmentInfo } : {}),
       },
     });

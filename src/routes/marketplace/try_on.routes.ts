@@ -117,7 +117,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
    * so there is nothing to wait for or poll. /submit and /direct do the same job; /submit is kept for older clients.
    */
   const createTryOn = async (request: FastifyRequest, reply: FastifyReply, successCode: number) => {
-    const { personImage, garmentImage: requestedGarmentImage, category, productId, prompt, gender, size, garmentSize, color } = (request.body as any) || {};
+    const { personImage, garmentImage: requestedGarmentImage, category, productId, prompt, gender, size, garmentSize, color, styleOptions } = (request.body as any) || {};
     // Prefer the brand's clear AI reference image over the styled display photo.
     const garmentImage = resolveGarmentImage(productId, requestedGarmentImage);
 
@@ -151,6 +151,8 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
         prompt: typeof prompt === 'string' ? prompt.slice(0, 500) : undefined,
         shopper: parseShopperFit({ gender, size, garmentSize }),
         // What the shop calls this garment (type, colour, fabric ...), read from the catalogue, so the prompt fits it.
+        // Styling choices such as tucked_in: only plain short strings are passed on; unknown ids are ignored later.
+        styleOptions: Array.isArray(styleOptions) ? styleOptions.filter((s: unknown): s is string => typeof s === 'string' && s.length <= 30).slice(0, 12) : undefined,
         garmentInfo: lookupGarmentInfo(productId, typeof requestedGarmentImage === 'string' ? requestedGarmentImage : undefined, color),
       });
       db.finalizeGeneration(job.id, 'COMPLETED');
@@ -162,6 +164,7 @@ export async function marketplaceTryOnRoutes(app: FastifyInstance) {
         status: 'COMPLETED',
         provider: generated.provider ?? 'gemini',
         model: generated.imageModel,
+        promptVersion: generated.promptVersion,
         resultUrl: hosted.url,
         output_url: hosted.url,
         result: { output_url: hosted.url, width: generated.width, height: generated.height },

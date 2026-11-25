@@ -37,6 +37,8 @@ const CreateAsyncJobSchema = z.object({
   gender: GenderSchema.optional(),
   size: SizeSchema.optional(),
   garmentSize: SizeSchema.optional(),
+  // Styling the shopper chose, for example ["tucked_in", "sleeves_rolled"]. Unknown ids are ignored.
+  styleOptions: z.array(z.string().max(30)).max(12).optional(),
   idempotencyKey: z.string().optional(),
   consentGiven: z.boolean().optional(),
 });
@@ -104,6 +106,7 @@ export async function asyncTryOnRoutes(app: FastifyInstance) {
       gender: parsed.data.gender,
       size: parsed.data.size,
       garmentSize: parsed.data.garmentSize,
+      styleOptions: parsed.data.styleOptions,
       idempotencyKey,
       consentGiven: parsed.data.consentGiven,
       correlationId: request.correlationId,

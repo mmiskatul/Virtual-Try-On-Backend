@@ -120,9 +120,10 @@ export async function runDirectTryOn(input: {
   prompt?: string;
   shopper?: ShopperFit;
   garmentInfo?: GarmentInfo;
+  styleOptions?: string[];
 }) {
   const [person, garment] = await Promise.all([loadImageInput(input.personImage, 'Your photo'), loadImageInput(input.garmentImage, 'The garment photo')]);
-  const generated = await tryOnEngine.generate({ person, garment, category: input.category, prompt: input.prompt, shopper: input.shopper, garmentInfo: input.garmentInfo });
+  const generated = await tryOnEngine.generate({ person, garment, category: input.category, prompt: input.prompt, shopper: input.shopper, garmentInfo: input.garmentInfo, styleOptions: input.styleOptions });
   const hosted = await hostResult(input.jobId, input.tenantId, generated.bytes, generated.mimeType);
   return { generated, hosted };
 }
