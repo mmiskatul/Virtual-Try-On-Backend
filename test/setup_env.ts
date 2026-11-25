@@ -16,6 +16,10 @@ process.env.ALLOW_BEARER_WITHOUT_SESSION = 'true';
 // Webhook tests deliver to a local server and retry quickly.
 process.env.WEBHOOK_ALLOW_PRIVATE = 'true';
 process.env.WEBHOOK_RETRY_DELAYS_MS = '20,20';
+// Tests must never call the real fal.ai account, even when a developer's .env has a key. The config loader treats an
+// empty value as "not set" and would read the real key from .env, so use a harmless dummy and force Gemini-only mode.
+process.env.FAL_KEY = 'disabled-in-tests';
+process.env.TRYON_PROVIDER = 'gemini';
 
 // Each test file gets its own throwaway data folder, so tests never read or change the real `.data` snapshot, never
 // see leftovers from earlier runs, and never affect each other. It is deleted when the file's tests finish.
